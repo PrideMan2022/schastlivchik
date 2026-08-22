@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=22">
+<link rel="stylesheet" href="styles.css?v=25">
 </head>
 <body>
 <header><div class="wrap hd">
@@ -25,6 +25,7 @@
   </div>
 </div></header>
 
+<div class="appbg" aria-hidden="true"></div>
 <main class="wrap" id="app"></main>
 
 <nav><div class="nv">
@@ -40,7 +41,7 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=22"></script>
+<script src="core.js?v=25"></script>
 <script>
 'use strict';
 const U = () => Core.user, CC = () => Core.core;
@@ -770,14 +771,14 @@ function welcome(){
   regAvatar = regAvatar || Object.assign({}, U().avatar);
   $('#layer').innerHTML = `
   <div class="modal"><div class="mbox">
-    <div style="font-size:42px;line-height:1;text-align:center">🍀</div>
+    <div class="emblem" role="img" aria-label="Счастливчик"></div>
     <h3 style="text-align:center">Добро пожаловать!</h3>
     <div class="tiny muted" style="text-align:center;margin-bottom:6px">
       Выберите имя, аватар и почту — на неё придут ответы поддержки.</div>
     <div class="avapreview" id="avapreview"></div>
     <div class="row between center" style="margin-bottom:10px">
       <div class="eyebrow">выберите иконку</div>
-      <button class="btn ghost sm" onclick="$('#avafile').click()">📷 Своё фото</button>
+      <button class="btn ghost sm" onclick="$('#avafile').click()">Своё фото</button>
     </div>
     <input type="file" id="avafile" accept="image/*" class="hidden" onchange="uploadAvatar(this)">
     <div id="icongrid"></div>

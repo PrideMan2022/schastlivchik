@@ -9,6 +9,14 @@ core = io.open(os.path.join(root, 'core.js'),   encoding='utf-8').read()
 logo = io.open(os.path.join(root, 'assets/logo.svg'), encoding='utf-8').read()
 logo_uri = 'data:image/svg+xml;base64,' + base64.b64encode(logo.encode('utf-8')).decode()
 
+def jpg_uri(name):
+    data = open(os.path.join(root, 'assets', name), 'rb').read()
+    return 'data:image/jpeg;base64,' + base64.b64encode(data).decode()
+
+# фоны и эмблема вшиваются в css, иначе автономный файл остался бы без картинок
+for pic in ('bg-lobby.jpg', 'bg-table.jpg', 'logo.jpg'):
+    css = css.replace('assets/' + pic, jpg_uri(pic))
+
 os.makedirs(os.path.join(root, 'dist'), exist_ok=True)
 for src_name, dst_name in [('index.html', 'Счастливчик.html'), ('admin.html', 'Счастливчик-админка.html')]:
     s = io.open(os.path.join(root, src_name), encoding='utf-8').read()

@@ -436,3 +436,26 @@ table.tb td .q.gold{color:var(--gold)}
   .tablewrap{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,.95fr);
     gap:22px;align-items:start}
 }
+
+/* ============================================================
+   ФИРМЕННЫЕ ИЗОБРАЖЕНИЯ (сгенерированы GigaChat)
+   Кадры используются как подложки, поверх — затемняющий слой,
+   иначе текст теряется на светлых пятнах боке.
+   ============================================================ */
+.appbg{position:fixed;inset:0;z-index:-2;background:url("assets/bg-lobby.jpg") center/cover no-repeat;
+  opacity:.5;filter:saturate(1.05)}
+.appbg:after{content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,rgba(10,12,22,.72),rgba(10,12,22,.86) 45%,rgba(10,12,22,.95))}
+
+/* сукно стола: кадр GigaChat + фирменное свечение поверх */
+.felt{background-image:
+  radial-gradient(520px 260px at 50% -30px, rgba(108,92,231,.42), transparent 70%),
+  linear-gradient(180deg,rgba(16,20,48,.72),rgba(9,11,26,.88)),
+  url("assets/bg-table.jpg");
+  background-size:auto, auto, cover;
+  background-position:center, center, center}
+
+/* эмблема на приветствии — джипег в круглой маске, белые углы обрезаются */
+.emblem{width:clamp(120px,34vw,168px);height:clamp(120px,34vw,168px);border-radius:50%;margin:0 auto 6px;
+  background:url("assets/logo.jpg") center/128% no-repeat;
+  box-shadow:0 16px 40px rgba(108,92,231,.45),inset 0 0 0 2px rgba(255,194,75,.5)}
