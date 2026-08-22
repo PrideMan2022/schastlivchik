@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Счастливчик — кабинет модератора</title>
+<meta name="theme-color" content="#06070a">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css?v=5">
+</head>
+<body>
+<header><div class="wrap adminbar">
+  <img class="logo" src="assets/logo.svg?v=3" alt="" width="38" height="38">
+  <div class="brand"><b>Модерация</b><span>счастливчик</span></div>
+  <div class="tabs" id="tabs"></div>
+</div></header>
+<main class="wrap" id="app"></main>
+<div id="toasts"></div>
+<div id="layer"></div>
+
+<script src="core.js?v=5"></script>
+<script>
+'use strict';
+const CC = () => Core.core, U = () => Core.user;
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const money = n => Math.round(n).toLocaleString('ru-RU');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function plural(n,a,b,c){const m=Math.abs(n)%100,d=m%10;if(m>10&&m<20)return c;if(d>1&&d<5)return b;if(d===1)return a;return c;}
+const dt = t => t ? new Date(t).toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' }) : '—';
+function toast(text, kind){
+  const el = document.createElement('div'); el.className = 'toast ' + (kind || ''); el.textContent = text;
+  $('#toasts').appendChild(el);
+  setTimeout(()=>{ el.style.transition='.3s'; el.style.opacity=0; }, 2400);
+  setTimeout(()=> el.remove(), 2750);
+}
+function closeLayer(){ $('#layer').innerHTML = ''; }
+
+/* ---------- доступ ---------- */
+const SKEY = 'schastlivchik.admin';
+let admin = sessionStorage.getItem(SKEY) || '';
+function gate(){
+  document.getElementById('tabs').innerHTML = '';
+  $('#app').innerHTML = `
+    <div class="h1">Кабинет модератора</div>
+    <div class="sub">Разбор жалоб, возвраты платежей и контроль экономики.</div>
+    <div class="panel acc" style="max-width:420px">
+      <label class="field"><span>имя модератора</span><input id="who" type="text" value="Модератор"></label>
+      <label class="field"><span>код доступа</span><input id="pass" type="password" placeholder="по умолчанию 1234"></label>
+      <div class="acts" style="margin-top:18px"><button class="btn grow" onclick="enter()">войти</button>
+        <a class="btn ghost" href="index.html">к игре</a></div>
+      <div class="tiny muted" style="margin-top:14px">Демо-защита на стороне клиента. В бою — вход по логину
+        на сервере, роли и журнал действий в базе.</div>
+    </div>`;
+  setTimeout(()=>{ const p = $('#pass'); if (p) p.onkeydown = e => { if (e.key === 'Enter') enter(); }; }, 0);
+}
+function enter(){
+  if ($('#pass').value !== CC().adminPass){ toast('Неверный код доступа', 'bad'); return; }
+  admin = ($('#who').value || 'Модератор').slice(0, 40);
+  sessionStorage.setItem(SKEY, admin);
+  Core.log(admin, 'вход в кабинет', '', '');
+  render();
+}
+function logout(){ sessionStorage.removeItem(SKEY); admin = ''; gate(); }
+
+/* ---------- каркас ---------- */
+let tab = 'dash';
+const TABS = [
+  ['dash','Обзор'], ['tickets','Жалобы'], ['refunds','Возвраты'], ['payouts','Выплаты'],
+  ['orders','Платежи'], ['players','Игроки'], ['audit','Журнал']
+];
+function counts(){
+  return { tickets: CC().tickets.filter(t => t.status === 'new').length,
+           refunds: CC().refunds.filter(r => r.status === 'new').length,
+           payouts: CC().payouts.filter(p => p.status === 'new').length };
+}
+function render(){
+  if (!admin) return gate();
+  Core.reload();
+  const c = counts();
+  $('#tabs').innerHTML = TABS.map(([k,n]) =>
+    `<button class="${tab===k?'on':''}" onclick="tab='${k}';render()">${n}${c[k]?`<span class="cnt">${c[k]}</span>`:''}</button>`
+  ).join('') + `<button onclick="logout()">выход</button>`;
+  ({ dash:vDash, tickets:vTickets, refunds:vRefunds, payouts:vPayouts,
+     orders:vOrders, players:vPlayers, audit:vAudit }[tab])();
+}
+
+/* ---------- обзор ---------- */
+function vDash(){
+  const C = CC(), u = U();
+  const paid = C.orders.filter(o => o.status === 'paid' || o.status === 'refund_requested');
+  const refunded = C.orders.filter(o => o.status === 'refunded');
+  const conv = C.orders.length ? Math.round(paid.length / C.orders.length * 100) : 0;
+  const c = counts();
+  $('#app').innerHTML = `
+    <div class="h1">Обзор</div>
+    <div class="sub">Данные считаются из общего хранилища игры: продажи монет, комиссия столов, обращения.</div>
+    <div class="kpis">
+      <div class="kpi"><b class="num gold">${money(C.revenue)} ₽</b><span>выручка</span></div>
+      <div class="kpi"><b class="num">${paid.length}</b><span>оплаченных заказов</span></div>
+      <div class="kpi"><b class="num">${conv}%</b><span>доходят до оплаты</span></div>
+      <div class="kpi"><b class="num ${refunded.length?'neg':''}">${refunded.length}</b><span>возвратов</span></div>
+      <div class="kpi"><b class="num">${money(C.houseFee)}</b><span>комиссия столов</span></div>
+      <div class="kpi"><b class="num pos">${money(C.charity)} ₽</b><span>копилка добра</span></div>
+      <div class="kpi"><b class="num">${money(C.paidOut)} ₽</b><span>выплачено игрокам</span></div>
+      <div class="kpi ${c.payouts?'hi':''}"><b class="num ${c.payouts?'gold':''}">${c.payouts}</b><span>выплат в очереди</span></div>
+      <div class="kpi"><b class="num ${c.tickets?'gold':''}">${c.tickets}</b><span>жалоб в очереди</span></div>
+      <div class="kpi"><b class="num ${c.refunds?'gold':''}">${c.refunds}</b><span>возвратов в очереди</span></div>
+    </div>
+    <div class="row" style="gap:1px;flex-wrap:wrap">
+      <div class="panel grow" style="min-width:260px">
+        <div class="eyebrow">очередь на разбор</div>
+        <div class="tiny muted" style="margin:8px 0 14px">${c.tickets + c.refunds + c.payouts
+          ? 'Требуют решения: ' + c.tickets + ' жалоб, ' + c.refunds + ' возвратов, ' + c.payouts + ' выплат.'
+          : 'Очередь пуста — необработанных обращений нет.'}</div>
+        <div class="acts">
+          <button class="btn line sm" onclick="tab='tickets';render()">к жалобам</button>
+          <button class="btn line sm" onclick="tab='refunds';render()">к возвратам</button>
+          <button class="btn line sm" onclick="tab='payouts';render()">к выплатам</button></div>
+      </div>
+      <div class="panel grow" style="min-width:260px">
+        <div class="eyebrow">текущий игрок</div>
+        <div class="tiny muted" style="margin:8px 0 14px">${esc(u.nick)} · ${u.id.slice(0,12)} ·
+          ${money(u.coins)} монет · ${u.played} ${plural(u.played,'раунд','раунда','раундов')}${u.blocked ? ' · <span class="neg">заблокирован</span>' : ''}</div>
+        <div class="acts"><button class="btn line sm" onclick="tab='players';render()">карточка игрока</button></div>
+      </div>
+    </div>`;
+}
+
+/* ---------- жалобы ---------- */
+let fTickets = 'new';
+function vTickets(){
+  const all = CC().tickets;
+  const list = all.filter(t => fTickets === 'all' ? true : t.status === fTickets);
+  $('#app').innerHTML = `
+    <div class="h1">Жалобы</div>
+    <div class="sub">К обращению по спорному раунду прикладывается снимок раунда: выпавшее число, ставка, банк.</div>
+    <div class="filters">
+      ${[['new','Новые'],['in_work','В работе'],['resolved','Решённые'],['rejected','Отклонённые'],['all','Все']]
+        .map(([k,n])=>`<button class="${fTickets===k?'on':''}" onclick="fTickets='${k}';render()">${n}</button>`).join('')}
+    </div>
+    ${list.length ? `<div class="tbwrap"><table class="tb">
+      <tr><th>Создана</th><th>Игрок</th><th>Тема и текст</th><th>Раунд</th><th>Статус</th><th></th></tr>
+      ${list.map(t => `<tr>
+        <td class="num">${dt(t.createdAt)}</td>
+        <td>${esc(t.nick)}<div class="q">${t.userId.slice(0,10)}</div></td>
+        <td><b>${esc(t.topic)}</b><div class="q">${esc(t.text)}</div>
+          ${t.answer ? `<div class="q gold">Ответ: ${esc(t.answer)}${t.compensation?` · +${money(t.compensation)} монет`:''} — ${esc(t.by)}</div>` : ''}</td>
+        <td>${t.snapshot ? `выпало <b class="gold">${t.snapshot.roll}</b><div class="q">ставка ${t.snapshot.pick} · банк ${money(t.snapshot.pot)} · ${t.snapshot.players} игроков<br>итог ${t.snapshot.delta>0?'+':''}${money(t.snapshot.delta)}</div>` : '<span class="muted">—</span>'}</td>
+        <td><span class="tag ${t.status==='resolved'?'ok':t.status==='rejected'?'no':'new'}">${
+          {new:'новая', in_work:'в работе', resolved:'решена', rejected:'отклонена'}[t.status]}</span></td>
+        <td>${t.status === 'new' || t.status === 'in_work'
+          ? `<button class="btn line sm" onclick="openTicket('${t.id}')">разобрать</button>`
+          : `<button class="btn ghost sm" onclick="openTicket('${t.id}')">открыть</button>`}</td>
+      </tr>`).join('')}
+    </table></div>` : '<div class="empty">обращений в этой вкладке нет</div>'}`;
+}
+function openTicket(id){
+  const t = CC().tickets.find(x => x.id === id); if (!t) return;
+  const s = t.snapshot;
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" style="max-width:540px" onclick="event.stopPropagation()">
+    <div class="eyebrow">жалоба ${esc(t.id.slice(-6))} · ${dt(t.createdAt)}</div>
+    <h3>${esc(t.topic)}</h3>
+    <div class="tiny muted" style="margin-top:6px">${esc(t.nick)} · ${t.userId.slice(0,12)}</div>
+    <div class="panel" style="margin:16px 0">${esc(t.text)}</div>
+    ${s ? `<div class="podium">
+      <div class="pl"><div class="main"><b>Снимок раунда</b><div class="tiny muted">${dt(s.t)} · стол «${esc(s.table)}»</div></div></div>
+      <div class="pl"><div class="main"><b>Выпало ${s.roll}, ставка на ${s.pick}</b>
+        <div class="tiny muted">банк ${money(s.pot)} · ${s.players} игроков · место ${s.place || '—'}</div></div>
+        <span class="amt ${s.delta>=0?'pos':'muted'}">${s.delta>0?'+':''}${money(s.delta)}</span></div>
+      <div class="pl"><div class="main"><b>Проверка расчёта</b>
+        <div class="tiny muted">${checkRound(s)}</div></div></div>
+    </div>` : ''}
+    <label class="field"><span>ответ игроку</span><textarea id="tkans">${esc(t.answer)}</textarea></label>
+    <label class="field"><span>компенсация, монет</span><input id="tkcomp" type="number" min="0" step="10" value="${t.compensation || 0}"></label>
+    <div class="acts" style="margin-top:18px">
+      <button class="btn grow" onclick="decide('${t.id}','resolved')">решить с ответом</button>
+      <button class="btn ghost" onclick="decide('${t.id}','in_work')">в работу</button>
+      <button class="btn danger" onclick="decide('${t.id}','rejected')">отклонить</button>
+    </div>
+    <div class="acts" style="margin-top:10px">
+      <button class="btn ghost sm grow" onclick="blockUser('${t.userId}',true)">заблокировать игрока</button>
+      <button class="btn ghost sm grow" onclick="blockUser('${t.userId}',false)">снять блокировку</button>
+    </div>
+  </div></div>`;
+}
+/* Пересчёт раунда по сохранённому снимку — модератор видит, сходится ли выплата. */
+function checkRound(s){
+  if (!s || !s.pot) return 'данных для пересчёта недостаточно';
+  const fee = Math.round(s.pot * 0.05);
+  const share = { 1:0.70, 2:0.20, 3:0.05 }[s.place];
+  if (!s.place) return 'без приза: банк ' + money(s.pot) + ', комиссия ' + money(fee) + ' — потеря ставки ' + money(s.stake) + ' корректна';
+  const due = Math.floor(s.pot * share) - s.stake;
+  const ok = Math.abs(due - s.delta) <= Math.max(3, s.players);
+  return (ok ? 'расчёт сходится: ' : 'расхождение! ') + 'по долям ожидается ' + (due>0?'+':'') + money(due) +
+         ', начислено ' + (s.delta>0?'+':'') + money(s.delta);
+}
+function decide(id, verdict){
+  const r = Core.resolveTicket(id, verdict, $('#tkans').value, +$('#tkcomp').value, admin);
+  toast(r.ok ? 'Решение сохранено' : r.err, r.ok ? 'good' : 'bad');
+  closeLayer(); render();
+}
+function blockUser(userId, flag){
+  const reason = flag ? (prompt('Причина блокировки:', 'нарушение правил') || '') : '';
+  if (flag && !reason) return;
+  Core.setBlocked(userId, flag, reason, admin);
+  toast(flag ? 'Игрок заблокирован' : 'Блокировка снята', flag ? 'bad' : 'good');
+  closeLayer(); render();
+}
+
+/* ---------- возвраты ---------- */
+let fRef = 'new';
+function vRefunds(){
+  const list = CC().refunds.filter(r => fRef === 'all' ? true : r.status === fRef);
+  $('#app').innerHTML = `
+    <div class="h1">Возвраты платежей</div>
+    <div class="sub">При одобрении деньги возвращаются на способ оплаты, а непотраченные монеты списываются
+      с баланса игрока. Срок подачи — ${CC().settings.refundDays} дней с оплаты.</div>
+    <div class="filters">
+      ${[['new','Новые'],['approved','Одобренные'],['rejected','Отклонённые'],['all','Все']]
+        .map(([k,n])=>`<button class="${fRef===k?'on':''}" onclick="fRef='${k}';render()">${n}</button>`).join('')}
+    </div>
+    ${list.length ? `<div class="tbwrap"><table class="tb">
+      <tr><th>Подана</th><th>Игрок</th><th>Сумма</th><th>Причина</th><th>Статус</th><th></th></tr>
+      ${list.map(r => {
+        const o = CC().orders.find(x => x.id === r.orderId) || {};
+        return `<tr>
+          <td class="num">${dt(r.createdAt)}</td>
+          <td>${esc(r.nick)}<div class="q">чек ${esc(o.receipt || '—')}</div></td>
+          <td class="num"><b>${money(r.sum)} ₽</b><div class="q">${money(r.coins)} монет</div></td>
+          <td><div class="q">${esc(r.reason || 'без причины')}</div>
+            ${r.comment ? `<div class="q gold">${esc(r.decidedBy)}: ${esc(r.comment)}</div>` : ''}</td>
+          <td><span class="tag ${r.status==='approved'?'ok':r.status==='rejected'?'no':'new'}">${
+            {new:'на проверке', approved:'одобрен', rejected:'отклонён'}[r.status]}</span>
+            ${r.coinsTaken ? `<div class="q">списано ${money(r.coinsTaken)} монет</div>` : ''}</td>
+          <td>${r.status === 'new' ? `<button class="btn line sm" onclick="openRefund('${r.id}')">решить</button>` : ''}</td>
+        </tr>`; }).join('')}
+    </table></div>` : '<div class="empty">заявок в этой вкладке нет</div>'}`;
+}
+function openRefund(id){
+  const r = CC().refunds.find(x => x.id === id); if (!r) return;
+  const o = CC().orders.find(x => x.id === r.orderId) || {};
+  const spent = Math.max(0, r.coins - U().coins);
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div class="eyebrow">заявка ${esc(r.id.slice(-6))}</div>
+    <h3>Возврат ${money(r.sum)} ₽</h3>
+    <div class="podium" style="margin-top:16px">
+      <div class="pl"><div class="main"><b>Заказ</b><div class="tiny muted">${esc(o.receipt||'—')} · ${dt(o.paidAt)} · ${esc(o.method||'')}</div></div>
+        <span class="amt num">${money(r.coins)}</span></div>
+      <div class="pl"><div class="main"><b>Монет на балансе сейчас</b>
+        <div class="tiny muted">${spent ? 'потрачено в игре примерно ' + money(spent) : 'пакет не тронут'}</div></div>
+        <span class="amt num ${spent?'neg':'pos'}">${money(U().coins)}</span></div>
+      <div class="pl"><div class="main"><b>Причина игрока</b><div class="tiny muted">${esc(r.reason || 'не указана')}</div></div></div>
+    </div>
+    <label class="field"><span>комментарий к решению</span><textarea id="rfcom" placeholder="Виден игроку в профиле"></textarea></label>
+    <div class="acts" style="margin-top:18px">
+      <button class="btn grow" onclick="decideRef('${r.id}',true)">одобрить возврат</button>
+      <button class="btn danger" onclick="decideRef('${r.id}',false)">отклонить</button></div>
+  </div></div>`;
+}
+function decideRef(id, ok){
+  const r = Core.decideRefund(id, ok, $('#rfcom').value, admin);
+  toast(r.ok ? (ok ? 'Возврат одобрен' : 'Заявка отклонена') : r.err, r.ok ? (ok ? 'good' : '') : 'bad');
+  closeLayer(); render();
+}
+
+/* ---------- выплаты игрокам ---------- */
+let fPo = 'new';
+function vPayouts(){
+  const st = CC().settings;
+  const list = CC().payouts.filter(p => fPo === 'all' ? true : p.status === fPo);
+  $('#app').innerHTML = `
+    <div class="h1">Выплаты</div>
+    <div class="sub">Курс ${st.rate} монет = 1 ₽, лимит ${money(st.minPayout)}–${money(st.maxPayout)} ₽ за заявку.
+      Монеты резервируются в момент подачи; при отказе возвращаются игроку.
+      Выводится только чистый выигрыш — купленные монеты вывести нельзя.</div>
+    <div class="filters">
+      ${[['new','Новые'],['paid','Выплаченные'],['rejected','Отклонённые'],['all','Все']]
+        .map(([k,n])=>`<button class="${fPo===k?'on':''}" onclick="fPo='${k}';render()">${n}</button>`).join('')}
+    </div>
+    ${list.length ? `<div class="tbwrap"><table class="tb">
+      <tr><th>Подана</th><th>Игрок</th><th>Сумма</th><th>Куда</th><th>Проверка</th><th>Статус</th><th></th></tr>
+      ${list.map(p => `<tr>
+        <td class="num">${dt(p.createdAt)}</td>
+        <td>${esc(p.nick)}<div class="q">${esc(p.email || '')}</div></td>
+        <td class="num"><b>${money(p.sum)} ₽</b><div class="q">${money(p.coins)} монет</div></td>
+        <td>${esc((Core.METHODS.find(m=>m.id===p.method)||{}).n || p.method)}<div class="q">${esc(p.requisites)}</div></td>
+        <td><div class="q">${payoutCheck(p)}</div></td>
+        <td><span class="tag ${p.status==='paid'?'ok':p.status==='rejected'?'no':'new'}">${
+          {new:'на проверке', paid:'выплачено', rejected:'отклонено', approved:'одобрено'}[p.status]}</span>
+          ${p.comment ? `<div class="q gold">${esc(p.decidedBy)}: ${esc(p.comment)}</div>` : ''}</td>
+        <td>${p.status === 'new' ? `<button class="btn line sm" onclick="openPayout('${p.id}')">решить</button>` : ''}</td>
+      </tr>`).join('')}
+    </table></div>` : '<div class="empty">заявок в этой вкладке нет</div>'}`;
+}
+/* Простая антифрод-сводка: сходится ли запрошенная сумма с игровой историей. */
+function payoutCheck(p){
+  const u = U();
+  if (p.userId !== u.id) return 'данные игрока недоступны';
+  const net = u.winSum - u.betSum;
+  const bought = CC().orders.filter(o => o.userId === u.id && o.status === 'paid').reduce((a, o) => a + o.price, 0);
+  const flags = [];
+  if (net < p.coins) flags.push('сумма больше чистого выигрыша');
+  if (u.played < 10) flags.push('мало сыгранных раундов: ' + u.played);
+  if (u.blocked) flags.push('аккаунт заблокирован');
+  return (flags.length ? '⚠ ' + flags.join('; ') : '✓ выигрыш покрывает заявку') +
+         '<br>сыграно ' + u.played + ', чистый выигрыш ' + Math.round(net) + ' монет, оплачено ' + bought + ' ₽';
+}
+function openPayout(id){
+  const p = CC().payouts.find(x => x.id === id); if (!p) return;
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div class="eyebrow">заявка ${esc(p.id.slice(-6))} · ${dt(p.createdAt)}</div>
+    <h3>Выплата ${money(p.sum)} ₽</h3>
+    <div class="podium" style="margin-top:16px">
+      <div class="pl"><div class="main"><b>${esc(p.nick)}</b><div class="tiny muted">${esc(p.email || '')}</div></div>
+        <span class="amt num">${money(p.coins)}</span></div>
+      <div class="pl"><div class="main"><b>${esc((Core.METHODS.find(m=>m.id===p.method)||{}).n || p.method)}</b>
+        <div class="tiny muted">реквизиты: ${esc(p.requisites)}</div></div></div>
+      <div class="pl"><div class="main"><b>Проверка</b><div class="tiny muted">${payoutCheck(p)}</div></div></div>
+    </div>
+    <label class="field"><span>комментарий к решению</span><textarea id="pocom" placeholder="Виден игроку в кошельке"></textarea></label>
+    <div class="acts" style="margin-top:18px">
+      <button class="btn grow" onclick="decidePo('${p.id}',true)">выплатить</button>
+      <button class="btn danger" onclick="decidePo('${p.id}',false)">отклонить</button></div>
+    <div class="tiny muted" style="margin-top:12px">«Выплатить» помечает заявку проведённой: монеты уже списаны,
+      деньги отправляются вручную через платёжный кабинет. Отказ возвращает монеты игроку.</div>
+  </div></div>`;
+}
+function decidePo(id, ok){
+  const r = Core.decidePayout(id, ok, $('#pocom').value, admin);
+  toast(r.ok ? (ok ? 'Выплата проведена' : 'Заявка отклонена, монеты возвращены') : r.err, r.ok ? (ok ? 'good' : '') : 'bad');
+  closeLayer(); render();
+}
+
+/* ---------- платежи ---------- */
+function vOrders(){
+  const o = CC().orders;
+  $('#app').innerHTML = `
+    <div class="h1">Платежи</div>
+    <div class="sub">Все заказы монет. Статусы приходят от платёжного шлюза; в демо оплата подтверждается вручную.</div>
+    ${o.length ? `<div class="tbwrap"><table class="tb">
+      <tr><th>Чек</th><th>Создан</th><th>Игрок</th><th>Пакет</th><th>Сумма</th><th>Способ</th><th>Статус</th></tr>
+      ${o.map(x => `<tr>
+        <td class="num">${esc(x.receipt)}</td><td class="num">${dt(x.createdAt)}</td>
+        <td>${esc(x.nick)}<div class="q">${x.userId.slice(0,10)}</div></td>
+        <td>${esc(x.label)}<div class="q">${money(x.coins)} монет</div></td>
+        <td class="num"><b>${money(x.price)} ₽</b></td>
+        <td>${esc((Core.METHODS.find(m=>m.id===x.method)||{}).n || x.method)}</td>
+        <td><span class="tag ${x.status==='paid'?'ok':(x.status==='refunded'||x.status==='failed')?'no':'new'}">${
+          {created:'ожидает', paid:'оплачен', failed:'не прошёл', refund_requested:'возврат на проверке', refunded:'возвращён'}[x.status]}</span></td>
+      </tr>`).join('')}
+    </table></div>` : '<div class="empty">платежей нет</div>'}`;
+}
+
+/* ---------- игроки ---------- */
+function vPlayers(){
+  const u = U(), C = CC();
+  const spent = C.orders.filter(o => o.userId === u.id && o.status === 'paid').reduce((a, o) => a + o.price, 0);
+  $('#app').innerHTML = `
+    <div class="h1">Игроки</div>
+    <div class="sub">В демоверсии база живёт в браузере, поэтому карточка одна — текущий игрок.
+      В бою здесь список с поиском по нику, чеку и идентификатору.</div>
+    <div class="panel acc">
+      <div class="row between center">
+        <div><div style="font-size:21px;font-weight:800">${esc(u.nick)}</div>
+          <div class="tiny muted">${esc(u.email || 'почта не указана')}</div>
+          <div class="tiny muted">${u.id} · с ${dt(u.createdAt)}</div></div>
+        <span class="tag ${u.blocked?'no':'ok'}">${u.blocked ? 'заблокирован' : 'активен'}</span>
+      </div>
+      <div class="kpis" style="margin:18px 0 0">
+        <div class="kpi"><b class="num gold">${money(u.coins)}</b><span>монет сейчас</span></div>
+        <div class="kpi"><b class="num">${money(spent)} ₽</b><span>оплачено</span></div>
+        <div class="kpi"><b class="num">${u.played}</b><span>раундов</span></div>
+        <div class="kpi"><b class="num">${u.wins}</b><span>в призах</span></div>
+        <div class="kpi"><b class="num">${money(u.betSum)}</b><span>поставлено</span></div>
+        <div class="kpi"><b class="num">${money(u.winSum)}</b><span>выиграно</span></div>
+        <div class="kpi"><b class="num gold">${money(Core.coinsToRub(Core.withdrawable()))} ₽</b><span>доступно к выводу</span></div>
+      </div>
+      ${u.blocked ? `<div class="tiny neg" style="margin-top:14px">Причина блокировки: ${esc(u.blockReason || '—')}</div>` : ''}
+      <div class="acts" style="margin-top:18px">
+        <button class="btn line sm" onclick="grant()">начислить монеты</button>
+        ${u.blocked
+          ? `<button class="btn ghost sm" onclick="blockUser('${u.id}',false)">снять блокировку</button>`
+          : `<button class="btn danger sm" onclick="blockUser('${u.id}',true)">заблокировать</button>`}
+      </div>
+    </div>`;
+}
+function grant(){
+  const n = Math.round(+prompt('Сколько монет начислить игроку?', '500') || 0);
+  if (!n) return;
+  U().coins += n; Core.saveUser();
+  Core.log(admin, 'ручное начисление', n + ' монет', U().id);
+  toast('Начислено ' + money(n) + ' монет', 'good'); render();
+}
+
+/* ---------- журнал ---------- */
+function vAudit(){
+  const a = CC().audit;
+  $('#app').innerHTML = `
+    <div class="h1">Журнал действий</div>
+    <div class="sub">Каждое решение модератора и каждое движение денег пишется в журнал — последние 400 записей.</div>
+    ${a.length ? `<div class="tbwrap"><table class="tb">
+      <tr><th>Время</th><th>Кто</th><th>Действие</th><th>Детали</th><th>Объект</th></tr>
+      ${a.map(x => `<tr><td class="num">${dt(x.t)}</td><td>${esc(x.actor)}</td>
+        <td><b>${esc(x.action)}</b></td><td><div class="q">${esc(x.detail)}</div></td>
+        <td class="num muted">${esc(String(x.ref).slice(-8))}</td></tr>`).join('')}
+    </table></div>` : '<div class="empty">журнал пуст</div>'}`;
+}
+
+admin ? render() : gate();
+</script>
+</body>
+</html>

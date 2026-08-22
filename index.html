@@ -1,0 +1,869 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Счастливчик</title>
+<meta name="description" content="Счастливчик — игра на удачу: угадайте число от 1 до 50 ближе всех и заберите банк.">
+<meta name="theme-color" content="#06070a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Счастливчик">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css?v=22">
+</head>
+<body>
+<header><div class="wrap hd">
+  <img class="logo" src="assets/logo.svg?v=3" alt="Счастливчик" width="40" height="40">
+  <div class="brand"><b>Счастливчик</b><span>число решает всё</span></div>
+  <button class="mark" id="hdava" onclick="editProfile()" title="Профиль">🍀</button>
+  <div class="purse">
+    <div class="v"><b class="num" id="coins">0</b><span>монет</span></div>
+    <button class="add" onclick="go('shop')" title="Купить монеты">+</button>
+  </div>
+</div></header>
+
+<main class="wrap" id="app"></main>
+
+<nav><div class="nv">
+  <button data-t="lobby" onclick="go('lobby')">
+    <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>Столы</button>
+  <button data-t="shop" onclick="go('shop')">
+    <svg viewBox="0 0 24 24"><path d="M3 6h18l-1.5 12H4.5z"/><path d="M8 6V4h8v2"/></svg>Монеты</button>
+  <button data-t="me" onclick="go('me')">
+    <svg viewBox="0 0 24 24"><path d="M4 20c0-4 3.6-6 8-6s8 2 8 6"/><circle cx="12" cy="8" r="4"/></svg>Профиль</button>
+  <button data-t="rules" onclick="go('rules')">
+    <svg viewBox="0 0 24 24"><path d="M4 4h7a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4z"/><path d="M20 4h-7a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h7z"/></svg>Правила</button>
+</div></nav>
+<div id="toasts"></div>
+<div id="layer"></div>
+
+<script src="core.js?v=22"></script>
+<script>
+'use strict';
+const U = () => Core.user, CC = () => Core.core;
+const $  = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const rnd = Core.rnd;
+const money = n => Math.round(n).toLocaleString('ru-RU');
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const dt = t => new Date(t).toLocaleString('ru-RU', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+function plural(n,a,b,c){const m=Math.abs(n)%100,d=m%10;if(m>10&&m<20)return c;if(d>1&&d<5)return b;if(d===1)return a;return c;}
+function toast(text, kind){
+  const el = document.createElement('div');
+  el.className = 'toast ' + (kind || ''); el.textContent = text;
+  $('#toasts').appendChild(el);
+  setTimeout(()=>{ el.style.transition='.3s'; el.style.opacity=0; }, 2400);
+  setTimeout(()=> el.remove(), 2750);
+}
+let actx = null;
+function beep(f, d, type, v){
+  if (!U().sound) return;
+  try{
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = type || 'sine'; o.frequency.value = f;
+    g.gain.setValueAtTime(v || .04, actx.currentTime);
+    g.gain.exponentialRampToValueAtTime(.0001, actx.currentTime + (d || .12));
+    o.connect(g); g.connect(actx.destination); o.start(); o.stop(actx.currentTime + (d || .12));
+  }catch(e){}
+}
+const sfx = {
+  tick: () => beep(1200, .04, 'square', .02),
+  pick: () => beep(560, .06, 'triangle', .04),
+  roll: () => beep(320, .04, 'sawtooth', .015),
+  win:  () => [523,659,784,1047].forEach((f,i)=> setTimeout(()=>beep(f,.2,'triangle',.06), i*95)),
+  lose: () => beep(150, .22, 'sine', .04)
+};
+function paintCoins(){ $('#coins').textContent = money(U().coins); }
+
+/* ---------- столы и боты ---------- */
+const STAKES = [10, 50, 100, 500, 1000], SIZES = [5, 10];
+const TNAMES = ['Партер','Ложа','Терраса','Бельэтаж','Галерея','Кабинет','Ротонда','Мезонин','Атриум','Купол'];
+const TABLES = [];
+STAKES.forEach((st, i) => SIZES.forEach((sz, j) =>
+  TABLES.push({ id:'t'+st+'_'+sz, stake:st, size:sz, name:TNAMES[(i*2+j)%TNAMES.length] })));
+
+/* цвета жетонов по номиналу — как фишки в клубе: младшие холодные, старшие тёплые */
+const CHIP = {
+  10:   { a:'#4f8cff', b:'#2a5bd7', tint:'rgba(79,140,255,.28)' },
+  50:   { a:'#34d399', b:'#0f9b6c', tint:'rgba(52,211,153,.26)' },
+  100:  { a:'#ff5fa2', b:'#c62b6d', tint:'rgba(255,95,162,.26)' },
+  500:  { a:'#a78bfa', b:'#6c5ce7', tint:'rgba(108,92,231,.32)' },
+  1000: { a:'#ffc24b', b:'#ff7a18', tint:'rgba(255,194,75,.3)'  }
+};
+/* цвет аватара — из имени, чтобы соперники узнавались в лицо */
+const AVC = ['#6c5ce7','#22d3ee','#ff5fa2','#34d399','#ffc24b','#ff7a18','#4f8cff','#a78bfa'];
+function avatarColor(name){
+  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  const c = AVC[h % AVC.length];
+  return 'linear-gradient(140deg,' + c + ',' + c + '99)';
+}
+const NAMES = ['Аркадий','Вера','Тимур','Лидия','Осип','Марта','Глеб','Ника','Савва','Рита','Кузьма','Ада','Феликс',
+  'Инга','Эрик','Злата','Тихон','Юна','Борис','Клара','Демид','Стефа','Ян','Ольга','Роман','Дина','Пётр','Милана',
+  'Игнат','Соня','Артур','Тамара','Лев','Агата','Марк','Ксения'];
+function makeBot(){
+  const nick = NAMES[rnd(0, NAMES.length - 1)];
+  return { bot:true, nick, mono:Core.ICONS[rnd(0, Core.ICONS.length - 1)], lucky:rnd(1,50),
+           speed:rnd(3,26), lazy:Core.rand() < .08,
+           pick:null, ready:false, readyAt:0, place:0, won:0 };
+}
+
+/* ---------- игровой цикл ---------- */
+const ROUND_SEC = 30, ROLL_MS = 2400, RESULT_MS = 4600;
+let G = null, loopId = null, screen = 'lobby', filterStake = 'all', pickerPhase = null, lastSec = -1;
+
+function sitDown(id){
+  const t = TABLES.find(x => x.id === id); if (!t) return;
+  if (U().blocked){ toast('Аккаунт заблокирован: ' + (U().blockReason || 'обратитесь в поддержку'), 'bad'); return; }
+  if (U().coins < t.stake){ toast('Не хватает монет для этого стола', 'bad'); go('shop'); return; }
+  G = { table:t, round:0, seats:[], phase:'betting', t0:0, roll:0, pot:0, fee:0, me:null, winners:[], cancelled:false };
+  newRound(true); go('table');
+}
+function exitTable(){
+  if (G && G.me && G.me.ready && G.phase === 'betting'){
+    U().coins += G.table.stake; Core.saveUser();
+    toast('Ставка возвращена: ' + money(G.table.stake) + ' монет');
+  }
+  stopLoop(); G = null; Core.saveUser(); paintCoins(); closeLayer();
+}
+function leaveTable(){ exitTable(); go('lobby'); }
+function newRound(first){
+  const t = G.table;
+  G.round++; G.phase = 'betting'; G.t0 = Date.now(); G.roll = 0;
+  G.winners = []; G.cancelled = false; pickerPhase = null;
+  const keep = first ? [] : G.seats.filter(s => s.bot && Core.rand() < .65);
+  keep.forEach(b => { b.pick=null; b.ready=false; b.readyAt=0; b.place=0; b.won=0; b.speed=rnd(3,26); b.lazy=Core.rand()<.08; });
+  const me = { bot:false, nick:'Вы', mono:'В', pick:null, ready:false, readyAt:0, place:0, won:0 };
+  G.me = me;
+  const seats = [me].concat(keep);
+  while (seats.length < t.size) seats.push(makeBot());
+  const used = {};
+  seats.forEach(s => { let n = s.nick, k = 2; while (used[n]) n = s.nick + ' ' + (k++); used[n] = 1; s.nick = n; });
+  G.seats = seats.slice(0, t.size);
+  renderTable(); startLoop();
+}
+function startLoop(){ if (!loopId) loopId = setInterval(tick, 180); }
+function stopLoop(){ clearInterval(loopId); loopId = null; }
+
+function tick(){
+  if (!G || screen !== 'table') return;
+  const el = Date.now() - G.t0;
+  if (G.phase === 'betting'){
+    const left = Math.max(0, ROUND_SEC - Math.floor(el / 1000));
+    G.seats.forEach(s => {
+      if (!s.bot || s.ready) return;
+      const sec = el / 1000;
+      if (!s.pick && sec > s.speed * .4) s.pick = freeNumber(s.lucky);
+      if (!s.lazy && sec >= s.speed && s.pick){ s.ready = true; s.readyAt = Date.now(); }
+    });
+    if (left !== lastSec){ lastSec = left; if (left <= 5 && left > 0) sfx.tick(); }
+    const allReady = G.seats.every(s => s.ready || (s.bot && s.lazy));
+    if (left <= 0 || (allReady && el > 2500)) startRoll(); else paintDyn();
+  } else if (G.phase === 'rolling'){
+    if (el < ROLL_MS){
+      const b = $('#drawnum');
+      if (b){ b.textContent = rnd(1, 50); if (Math.random() < .35) sfx.roll(); }
+    } else finishRound();
+  } else if (G.phase === 'results'){
+    if (el > RESULT_MS && !$('#resultbox')) newRound(false);
+  }
+}
+function freeNumber(pref){
+  const taken = new Set(G.seats.filter(s => s.pick).map(s => s.pick));
+  if (pref && !taken.has(pref) && Core.rand() < .5) return pref;
+  let n, g = 0; do { n = rnd(1, 50); } while (taken.has(n) && ++g < 200);
+  return n;
+}
+function pickNum(n, random){
+  if (!G || G.phase !== 'betting' || G.me.ready) return;
+  if (random) n = freeNumber(null);
+  if (G.seats.some(s => s !== G.me && s.pick === n)) return;
+  G.me.pick = n; sfx.pick(); paintDyn();
+}
+function ready(){
+  if (!G || G.phase !== 'betting' || G.me.ready) return;
+  if (!G.me.pick){ toast('Сначала выберите число', 'bad'); return; }
+  if (U().coins < G.table.stake){ toast('Не хватает монет', 'bad'); go('shop'); return; }
+  U().coins -= G.table.stake; G.me.ready = true; G.me.readyAt = Date.now();
+  Core.saveUser(); paintCoins(); beep(700, .1, 'triangle', .05); paintDyn();
+}
+function startRoll(){
+  const players = G.seats.filter(s => s.ready && s.pick);
+  if (players.length < 2){
+    G.cancelled = true; G.phase = 'results'; G.t0 = Date.now();
+    if (G.me.ready){ U().coins += G.table.stake; G.me.ready = false; Core.saveUser(); paintCoins(); }
+    toast('Мало игроков — раунд отменён, ставки возвращены');
+    renderTable(); return;
+  }
+  G.phase = 'rolling'; G.t0 = Date.now(); G.roll = rnd(1, 50);
+  G.pot = players.length * G.table.stake;
+  renderTable();
+}
+function finishRound(){
+  const t = G.table, players = G.seats.filter(s => s.ready && s.pick);
+  const res = Core.payout(players, G.roll, t.stake);
+  G.pot = res.pot; G.fee = res.fee; G.winners = res.list.slice(0, 3);
+  Core.registerFee(res.fee);
+  const u = U();
+  u.freq[G.roll]++;
+  res.list.forEach(p => { if (p.bot) u.botProfit[p.nick] = (u.botProfit[p.nick] || 0) + (p.won - t.stake); });
+  const me = G.me;
+  if (me.ready){
+    const delta = me.won - t.stake;
+    u.coins += me.won; u.played++; u.betSum += t.stake; u.winSum += me.won;
+    if (me.place){ u.wins++; u.streak++; if (u.streak > u.bestStreak) u.bestStreak = u.streak; } else u.streak = 0;
+    if (me.place === 1) u.top1++;
+    if (delta > u.best) u.best = delta;
+    u.hist.unshift({ id: Core.uid('r'), roll:G.roll, pick:me.pick, place:me.place, delta:delta,
+                     stake:t.stake, pot:res.pot, players:res.list.length, table:t.name, t:Date.now() });
+    if (u.hist.length > 80) u.hist.length = 80;
+    me.place ? sfx.win() : sfx.lose();
+  }
+  G.phase = 'results'; G.t0 = Date.now();
+  Core.saveUser(); paintCoins(); renderTable();
+  if (me.ready) showResult(me);
+}
+function showResult(me){
+  const delta = me.won - G.table.stake, rk = { 1:'🥇', 2:'🥈', 3:'🥉' };
+  if (me.place) confetti(me.place === 1 ? 70 : 30);
+  $('#layer').innerHTML = `
+  <div class="modal" id="resultbox" onclick="closeLayer()">
+    <div class="mbox" onclick="event.stopPropagation()">
+      <div style="font-size:44px;line-height:1">${me.place ? rk[me.place] : '🎲'}</div>
+      <h3>${me.place === 1 ? 'Главный победитель!' : me.place ? 'Вы в призах' : 'В этот раз мимо'}</h3>
+      <div class="tiny muted">выпало <b class="gold">${G.roll}</b> · ваше ${me.pick} · разница ${Math.abs(me.pick - G.roll)}</div>
+      <div class="verdict ${delta > 0 ? 'win' : 'muted'}">${delta > 0 ? '+' : ''}${money(delta)}</div>
+      <div class="eyebrow">распределение банка ${money(G.pot)}</div>
+      <div class="podium">
+        ${G.winners.map((p, i) => `<div class="pl p${i+1}">
+          <span class="rk">${rk[i+1]}</span>
+          <div class="main"><b>${esc(p.nick)}</b><div class="tiny muted">число ${p.pick} · разница ${Math.abs(p.pick - G.roll)}</div></div>
+          <span class="amt">+${money(p.won)}</span></div>`).join('')}
+        <div class="pl"><span class="rk">🏛</span><div class="main"><b>Комиссия стола</b>
+          <div class="tiny muted">5% банка, из них 10% в копилку добра</div></div>
+          <span class="amt muted">${money(G.fee)}</span></div>
+      </div>
+      <div class="acts">
+        <button class="btn gold grow" onclick="closeLayer()">Играть дальше</button>
+        <button class="btn ghost" onclick="closeLayer();leaveTable()">Выйти</button>
+      </div>
+      <button class="btn ghost full sm" style="margin-top:10px" onclick="closeLayer();complainRound('${U().hist[0] ? U().hist[0].id : ''}')">Пожаловаться на раунд</button>
+    </div>
+  </div>`;
+}
+function closeLayer(){ $('#layer').innerHTML = ''; if (G && G.phase === 'results') G.t0 = 0; }
+/* Салют при выигрыше: лёгкий, самоочищающийся, без библиотек. */
+function confetti(count){
+  const box = document.createElement('div'); box.className = 'spark';
+  const colors = ['#ffc24b','#ff5fa2','#22d3ee','#6c5ce7','#34d399'];
+  let html = '';
+  for (let i = 0; i < count; i++){
+    html += `<i style="left:${rnd(0,100)}%;top:${rnd(-30,-5)}vh;background:${colors[rnd(0,colors.length-1)]};
+      animation-duration:${(1.6 + Math.random()*1.6).toFixed(2)}s;animation-delay:${(Math.random()*.5).toFixed(2)}s"></i>`;
+  }
+  box.innerHTML = html; document.body.appendChild(box);
+  setTimeout(()=> box.remove(), 4200);
+}
+
+/* ============================================================
+   ЭКРАНЫ
+   ============================================================ */
+function go(name){
+  if (screen === 'table' && name !== 'table' && G) exitTable();
+  screen = name;
+  $$('.nv button').forEach(b => b.classList.toggle('on', b.dataset.t === name));
+  ({ lobby:renderLobby, shop:renderShop, me:renderMe, rules:renderRules, table:renderTable }[name] || renderLobby)();
+  window.scrollTo(0, 0);
+}
+
+/* --- лобби --- */
+function renderLobby(){
+  stopLoop();
+  const list = TABLES.filter(t => filterStake === 'all' || t.stake === filterStake);
+  $('#app').innerHTML = `
+   <div class="screen">
+    <div class="head">
+    <div class="h1">Игровые столы</div>
+    <div class="sub">Ставка на всех за столом одинаковая. Раунд — тридцать секунд, три победителя.</div>
+    <div class="filters">
+      <button class="${filterStake==='all'?'on':''}" onclick="setFilter('all')">Все</button>
+      ${STAKES.map(s => `<button class="${filterStake===s?'on':''}" onclick="setFilter(${s})">${s}</button>`).join('')}
+    </div></div>
+    <div class="scroll">
+    <div class="tables">
+      ${list.map(t => {
+        const busy = rnd(Math.min(2, t.size - 1), t.size - 1);
+        const poor = U().coins < t.stake;
+        const c = CHIP[t.stake];
+        return `<button class="tbl" onclick="sitDown('${t.id}')" style="--tint:${c.tint}">
+          <div class="top">
+            <div class="chip" style="background:linear-gradient(145deg,${c.a},${c.b})">${t.stake}</div>
+            <div><div class="nm">«${t.name}»</div>
+              <div class="sz">${t.size} ${plural(t.size,'место','места','мест')} · ставка ${t.stake}</div></div>
+          </div>
+          <div class="occ">${Array.from({length:t.size},(_,i)=>`<i class="${i<busy?'f':''}"></i>`).join('')}</div>
+          <div class="meta"><span>${busy}/${t.size} за столом</span><span>банк <b>${money(t.stake*t.size)}</b></span></div>
+          ${poor ? `<div class="lock">Нужно ${money(t.stake)} монет</div>` : ''}</button>`;
+      }).join('')}
+    </div>
+    <div class="panel acc" style="margin:14px 0 4px;padding:14px 18px">
+      <div class="row between center">
+        <div><div class="eyebrow">копилка добра</div>
+          <div class="tiny muted" style="margin-top:3px">10% прибыли заведения — в детский дом</div></div>
+        <div class="gold num" style="font-size:23px;font-weight:800">${money(CC().charity)} ₽</div>
+      </div>
+    </div>
+    </div>
+   </div>`;
+}
+function setFilter(v){ filterStake = v; renderLobby(); }
+
+/* --- стол --- */
+function renderTable(){
+  if (!G) return;
+  const t = G.table;
+  $('#app').innerHTML = `
+   <div class="screen">
+    <div class="thead head">
+      <button class="back" onclick="leaveTable()">←</button>
+      <div><div class="ttl">«${t.name}»</div><div class="st">ставка ${t.stake} · раунд ${G.round} · ${t.size} мест</div></div>
+      <div class="phase" id="phaselab"></div>
+    </div>
+    <div class="scroll">
+    <div class="tablewrap">
+      <div class="felt"><div id="dyn"></div><div class="seats" id="seats"></div></div>
+      <div class="side"><div id="picker"></div><div id="acts"></div></div>
+    </div>
+    </div>
+   </div>`;
+  paintDyn(true);
+}
+function paintDyn(force){
+  if (!G || screen !== 'table') return;
+  const dyn = $('#dyn'); if (!dyn) return;
+  const t = G.table, el = Date.now() - G.t0;
+  const inGame = G.seats.filter(s => s.ready).length;
+
+  if (G.phase === 'betting'){
+    const leftMs = Math.max(0, ROUND_SEC * 1000 - el), left = Math.ceil(leftMs / 1000);
+    const frac = leftMs / (ROUND_SEC * 1000), C0 = 2 * Math.PI * 42;
+    if (!$('#dial') || force){
+      dyn.innerHTML = `
+        <div class="dial ${left<=5?'warn':''}" id="dial">
+          <svg viewBox="0 0 100 100">
+            <defs><linearGradient id="dg" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#8b7bff"/></linearGradient></defs>
+            <circle class="bgc" cx="50" cy="50" r="42"/>
+            <circle class="fgc" cx="50" cy="50" r="42" stroke-dasharray="${C0}" stroke-dashoffset="0" id="arc"/></svg>
+          <b class="num" id="dialnum">${left}</b><span>секунд</span></div>
+        <div class="bank"><div class="lb">банк раунда</div>
+          <b class="num gold" id="banknum">${money(inGame * t.stake)}</b>
+          <div class="sm" id="banksub">${inGame} ${plural(inGame,'ставка','ставки','ставок')} по ${t.stake}</div></div>`;
+    } else {
+      $('#dialnum').textContent = left;
+      $('#arc').setAttribute('stroke-dashoffset', String(C0 * (1 - frac)));
+      $('#dial').classList.toggle('warn', left <= 5);
+      $('#banknum').textContent = money(inGame * t.stake);
+      $('#banksub').textContent = inGame + ' ' + plural(inGame,'ставка','ставки','ставок') + ' по ' + t.stake;
+    }
+    $('#phaselab').textContent = 'приём ставок';
+  } else if (G.phase === 'rolling'){
+    if (!$('#drawnum')) dyn.innerHTML = `
+      <div class="drawn spin"><b class="num" id="drawnum">0</b></div>
+      <div class="bank"><div class="lb">разыгрывается банк</div><b class="num gold">${money(G.pot)}</b>
+        <div class="sm">комиссия стола 5%</div></div>`;
+    $('#phaselab').textContent = 'розыгрыш';
+  } else {
+    dyn.innerHTML = G.cancelled
+      ? `<div class="drawn void"><b>отмена</b></div>
+         <div class="bank"><div class="lb">мало игроков</div><b class="num muted">—</b><div class="sm">ставки возвращены</div></div>`
+      : `<div class="drawn hit"><b class="num">${G.roll}</b></div>
+         <div class="bank"><div class="lb">банк раунда</div><b class="num gold">${money(G.pot)}</b>
+           <div class="sm">комиссия ${money(G.fee)} · выплачено ${money(G.pot - G.fee)}</div></div>`;
+    $('#phaselab').textContent = 'итоги';
+  }
+  paintSeats(); paintActs();
+  if (pickerPhase !== G.phase){ pickerPhase = G.phase; buildPicker(); }
+  syncPicker();
+}
+function paintSeats(){
+  const box = $('#seats'); if (!box) return;
+  const rk = { 1:'I', 2:'II', 3:'III' };
+  box.innerHTML = G.seats.map(s => {
+    const c = [];
+    if (!s.bot) c.push('me');
+    if (s.ready && G.phase === 'betting') c.push('set');
+    if (G.phase === 'results' && !G.cancelled){ if (s.place) c.push('w' + s.place); else c.push('out'); }
+    else if (!s.ready && G.phase === 'rolling') c.push('out');
+    const val = G.phase === 'betting'
+      ? (s.ready ? (s.bot ? '<span class="pk q">✓</span>' : `<span class="pk num">${s.pick}</span>`) : '<span class="pk q">—</span>')
+      : (s.ready ? `<span class="pk num">${s.pick}</span>` : '<span class="pk q">—</span>');
+    const st = G.phase === 'betting'
+      ? (s.ready ? 'готов ✓' : (s.pick ? 'выбирает' : 'думает'))
+      : (!s.ready ? 'не участвует' : (s.place ? rk[s.place] + ' · +' + money(s.won) : 'без приза'));
+    return `<div class="seat ${c.join(' ')}">
+      ${s.place === 1 ? '<span class="crown">👑</span>' : ''}
+      ${s.bot ? `<div class="av" style="background:${avatarColor(s.nick)}">${esc(s.mono)}</div>`
+               : avatarHTML(U().avatar, 34)}
+      <div class="who"><div class="nick">${esc(s.nick)}</div><div class="stt">${st}</div></div>${val}</div>`;
+  }).join('');
+}
+function buildPicker(){
+  const p = $('#picker');
+  if (G.phase !== 'betting'){ p.innerHTML = ''; return; }
+  p.innerHTML = `
+    <div class="picker">
+      <div class="pickhead"><div class="eyebrow">ваше число</div>
+        <div class="tiny muted">занятые числа недоступны</div></div>
+      <div class="g50">${Array.from({length:50},(_,i)=>`<button data-n="${i+1}" onclick="pickNum(${i+1})">${i+1}</button>`).join('')}</div>
+    </div>`;
+}
+function syncPicker(){
+  if (G.phase !== 'betting') return;
+  const taken = new Set(G.seats.filter(s => s !== G.me && s.pick).map(s => s.pick));
+  $$('#picker .g50 button').forEach(b => {
+    const n = +b.dataset.n;
+    b.classList.toggle('taken', taken.has(n) || G.me.ready);
+    b.classList.toggle('sel', G.me.pick === n);
+  });
+}
+function paintActs(){
+  const a = $('#acts'); if (!a) return;
+  if (G.phase === 'betting'){
+    a.innerHTML = `<div class="acts">
+        <button class="btn ${G.me.ready ? 'done' : 'gold'} grow" onclick="ready()" ${G.me.ready || !G.me.pick ? 'disabled' : ''}>
+          ${G.me.ready ? '✓ Ставка принята' : 'Готов · ' + G.table.stake + ' монет'}</button>
+        <button class="btn line" onclick="pickNum(0,true)">🎲 Наугад</button>
+        <button class="btn ghost" onclick="leaveTable()">Выйти</button></div>
+      <div class="hintline">Кто не нажал «Готов» за 30 секунд — в раунде не участвует</div>`;
+  } else if (G.phase === 'rolling'){
+    a.innerHTML = `<div class="acts"><button class="btn grow" disabled>Крутим барабан…</button></div>`;
+  } else {
+    a.innerHTML = `<div class="acts">
+      <button class="btn grow" onclick="G.t0=0">Следующий раунд →</button>
+      <button class="btn ghost" onclick="leaveTable()">Выйти</button></div>`;
+  }
+}
+
+/* --- магазин монет --- */
+let shopMethod = 'card', shopTab = 'in';
+function renderShop(){
+  stopLoop();
+  const st = CC().settings;
+  $('#app').innerHTML = `
+   <div class="screen">
+    <div class="head">
+    <div class="h1">Кошелёк</div>
+    <div class="filters">
+      <button class="${shopTab==='in'?'on':''}" onclick="shopTab='in';renderShop()">Пополнить</button>
+      ${CC().settings.payoutsEnabled ? `<button class="${shopTab==='out'?'on':''}" onclick="shopTab='out';renderShop()">Вывести</button>` : ''}
+      <button class="${shopTab==='hist'?'on':''}" onclick="shopTab='hist';renderShop()">История</button>
+    </div></div>
+    <div class="scroll" id="shopbody"></div>
+   </div>`;
+  if (shopTab === 'out' && !CC().settings.payoutsEnabled) shopTab = 'in';
+  ({ in: shopBuy, out: shopWithdraw, hist: shopHistory })[shopTab]();
+}
+function shopBuy(){
+  $('#shopbody').innerHTML = `
+    <div class="sub">Монеты — игровая валюта. Купленные монеты играют, а вывести можно только выигранное сверху.</div>
+    <div class="eyebrow" style="margin-bottom:8px">способ оплаты</div>
+    <div class="methods">${Core.METHODS.map(m =>
+      `<button class="${shopMethod===m.id?'on':''}" onclick="shopMethod='${m.id}';renderShop()">${m.n}</button>`).join('')}</div>
+    <div class="eyebrow" style="margin:22px 0 10px">пакеты</div>
+    <div class="packs">
+      ${Core.PACKS.map((p, i) => `<button class="pack ${p.bonus>=30?'best':''}" onclick="buy('${p.id}')">
+        ${p.bonus ? `<span class="bonus">+${p.bonus}%</span>` : ''}
+        <div class="stack">${['🪙','💰','💎','👑','🏆'][i]}</div>
+        <div class="coins num">${money(p.coins)}</div>
+        <div class="lbl">${p.label}</div>
+        <div class="price num">${money(p.price)} ₽</div>
+        <div class="rate">${(p.price/p.coins*1000).toFixed(0)} ₽ за 1000 монет</div>
+      </button>`).join('')}
+    </div>
+    <div class="panel flat" style="margin-top:18px">
+      <div class="eyebrow">как это работает по-настоящему</div>
+      <div class="tiny muted" style="margin-top:8px">В демоверсии оплата подтверждается кнопкой. В бою заказ уходит
+        в ЮKassa: игрок платит на стороне банка, а монеты начисляет вебхук
+        <span class="gold">payment.succeeded</span> — клиент к балансу не допускается.</div>
+    </div>`;
+}
+function shopWithdraw(){
+  const st = CC().settings, u = U();
+  const avail = Core.withdrawable(), availRub = Core.coinsToRub(avail);
+  const net = Math.max(0, u.winSum - u.betSum);
+  const pending = CC().payouts.filter(p => p.userId === u.id && p.status === 'new');
+  $('#shopbody').innerHTML = `
+    <div class="sub">Выводится только чистый выигрыш, купленные монеты не выводятся.
+      Курс ${st.rate} монет = 1 ₽ (покупка идёт примерно по 12 монет за рубль — разница и есть комиссия),
+      сумма от ${money(st.minPayout)} до ${money(st.maxPayout)} ₽ за заявку, проверка до суток.</div>
+    <div class="kpis">
+      <div class="kpi hi"><b class="num gold">${money(availRub)} ₽</b><span>доступно к выводу</span></div>
+      <div class="kpi"><b class="num">${money(avail)}</b><span>монет к выводу</span></div>
+      <div class="kpi"><b class="num ${net?'pos':''}">${money(net)}</b><span>чистый выигрыш</span></div>
+      <div class="kpi"><b class="num">${money(u.coins)}</b><span>всего монет</span></div>
+    </div>
+    ${availRub < st.minPayout ? `<div class="panel flat" style="margin-bottom:16px">
+      <div class="tiny muted">Пока выводить нечего: нужно выиграть сверх поставленного хотя бы на
+        ${money(Core.rubToCoins(st.minPayout))} монет (${money(st.minPayout)} ₽).
+        Купленные монеты не выводятся — они только играют.</div></div>` : ''}
+    <div class="panel">
+      <div class="eyebrow" style="margin-bottom:10px">куда вывести</div>
+      <div class="methods">${Core.METHODS.map(m =>
+        `<button class="${shopMethod===m.id?'on':''}" onclick="shopMethod='${m.id}';renderShop()">${m.n}</button>`).join('')}</div>
+      <label class="field"><span>сумма, ₽</span>
+        <input type="number" id="posum" value="${Math.min(Math.max(st.minPayout, availRub), st.maxPayout)}"
+          min="${st.minPayout}" max="${st.maxPayout}" step="10"></label>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        ${[st.minPayout, 1000, 2500, st.maxPayout].map(v =>
+          `<button class="btn ghost sm" onclick="$('#posum').value=${v}">${money(v)}</button>`).join('')}
+        ${availRub >= st.minPayout ? `<button class="btn ghost sm" onclick="$('#posum').value=${Math.min(availRub, st.maxPayout)}">всё доступное</button>` : ''}
+      </div>
+      <label class="field"><span>реквизиты — последние 4 цифры карты или телефон СБП</span>
+        <input type="text" id="poreq" placeholder="4242 или +7 900 000-00-00" maxlength="40"></label>
+      <button class="btn gold full" style="margin-top:18px" onclick="sendPayout()"
+        ${availRub < st.minPayout ? 'disabled' : ''}>Заказать выплату</button>
+      <div class="tiny muted" style="margin-top:12px">Полный номер карты вводить не нужно и не следует:
+        для сверки достаточно хвоста. В демоверсии деньги не уходят.</div>
+    </div>
+    ${pending.length ? `<div class="h2">Заявки в работе</div><div class="list">${pending.map(p => `
+      <div class="li"><span class="idx">₽</span>
+        <div class="main"><b>${money(p.sum)} ₽</b><div>${dt(p.createdAt)} · ${esc(p.requisites)} · ${money(p.coins)} монет зарезервировано</div></div>
+        <span class="tag new">на проверке</span></div>`).join('')}</div>` : ''}`;
+}
+function sendPayout(){
+  const r = Core.requestPayout($('#posum').value, shopMethod, $('#poreq').value);
+  if (!r.ok){ toast(r.err, 'bad'); return; }
+  paintCoins(); renderShop();
+  toast('Заявка на ' + money(r.payout.sum) + ' ₽ принята', 'good');
+}
+function shopHistory(){
+  const u = U(), orders = CC().orders.filter(o => o.userId === u.id);
+  const payouts = CC().payouts.filter(p => p.userId === u.id);
+  $('#shopbody').innerHTML = `
+    <div class="eyebrow" style="margin-bottom:10px">покупки</div>
+    ${orders.length ? `<div class="list">${orders.map(o => `
+      <div class="li"><span class="idx">${o.receipt.slice(-3)}</span>
+        <div class="main"><b>${money(o.coins)} монет · ${money(o.price)} ₽</b>
+          <div>${dt(o.createdAt)} · ${esc((Core.METHODS.find(m=>m.id===o.method)||{}).n || o.method)} · чек ${esc(o.receipt)}</div></div>
+        <span class="tag ${o.status==='paid'?'ok':(o.status==='refunded'||o.status==='failed')?'no':'new'}">${orderLabel(o.status)}</span>
+        ${o.status === 'paid' ? `<button class="btn ghost sm" onclick="askRefund('${o.id}')">возврат</button>` : ''}
+      </div>`).join('')}</div>` : '<div class="empty">покупок пока нет</div>'}
+    <div class="eyebrow" style="margin:22px 0 10px">выплаты</div>
+    ${payouts.length ? `<div class="list">${payouts.map(p => `
+      <div class="li"><span class="idx">₽</span>
+        <div class="main"><b>${money(p.sum)} ₽</b>
+          <div>${dt(p.createdAt)} · ${esc(p.requisites)} · ${money(p.coins)} монет</div>
+          ${p.comment ? `<div style="color:var(--gold);margin-top:4px">${esc(p.decidedBy)}: ${esc(p.comment)}</div>` : ''}</div>
+        <span class="tag ${p.status==='paid'?'ok':p.status==='rejected'?'no':'new'}">${
+          {new:'на проверке', paid:'выплачено', rejected:'отклонено', approved:'одобрено'}[p.status]}</span>
+      </div>`).join('')}</div>` : '<div class="empty">выплат ещё не было</div>'}`;
+}
+function orderLabel(s){
+  return { created:'ожидает оплаты', paid:'оплачен', failed:'не прошёл',
+           refund_requested:'возврат на проверке', refunded:'возвращён' }[s] || s;
+}
+function buy(packId){
+  const p = Core.PACKS.find(x => x.id === packId); if (!p) return;
+  const r = Core.createOrder(packId, shopMethod);
+  if (!r.ok){ toast(r.err, 'bad'); return; }
+  const o = r.order, m = (Core.METHODS.find(x => x.id === shopMethod) || {}).n;
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div class="eyebrow">заказ ${esc(o.receipt)}</div>
+    <h3>Оплата ${money(o.price)} ₽</h3>
+    <div class="tiny muted">${money(o.coins)} монет · ${esc(m)}</div>
+    <div class="podium" style="margin-top:18px">
+      <div class="pl"><div class="main"><b>Товар</b><div class="tiny muted">пакет «${esc(o.label)}»</div></div>
+        <span class="amt muted num">${money(o.coins)}</span></div>
+      <div class="pl"><div class="main"><b>К оплате</b><div class="tiny muted">НДС не облагается</div></div>
+        <span class="amt num">${money(o.price)} ₽</span></div>
+    </div>
+    <div class="tiny muted">Демоверсия: настоящее списание не производится. Кнопками ниже эмулируется
+      ответ платёжного шлюза.</div>
+    <div class="acts" style="margin-top:16px">
+      <button class="btn gold grow" onclick="payNow('${o.id}',true)">Оплата прошла</button>
+      <button class="btn ghost" onclick="payNow('${o.id}',false)">отказ банка</button>
+    </div>
+  </div></div>`;
+}
+function payNow(id, ok){
+  const r = Core.confirmOrder(id, ok);
+  closeLayer(); paintCoins();
+  toast(r.ok ? 'Зачислено ' + money(r.order.coins) + ' монет' : r.err, r.ok ? 'good' : 'bad');
+  if (r.ok) beep(880, .16, 'triangle', .06);
+  renderShop();
+}
+function askRefund(orderId){
+  const o = CC().orders.find(x => x.id === orderId); if (!o) return;
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div class="eyebrow">заявка на возврат</div>
+    <h3>${money(o.price)} ₽ по чеку ${esc(o.receipt)}</h3>
+    <div class="tiny muted">Заявку рассматривает модератор. При одобрении деньги возвращаются на способ оплаты,
+      а непотраченные монеты списываются с баланса.</div>
+    <label class="field"><span>причина</span>
+      <textarea id="rfreason" placeholder="Опишите, что произошло"></textarea></label>
+    <div class="acts" style="margin-top:16px">
+      <button class="btn grow" onclick="sendRefund('${o.id}')">отправить</button>
+      <button class="btn ghost" onclick="closeLayer()">отмена</button></div>
+  </div></div>`;
+}
+function sendRefund(orderId){
+  const r = Core.requestRefund(orderId, $('#rfreason').value);
+  toast(r.ok ? 'Заявка отправлена, ответ придёт в профиль' : r.err, r.ok ? 'good' : 'bad');
+  if (r.ok){ closeLayer(); renderShop(); }
+}
+
+/* --- профиль: статистика, история, жалобы, ответы модерации --- */
+let meTab = 'stats';
+function renderMe(){
+  stopLoop();
+  const u = U();
+  const net = u.winSum - u.betSum, rate = u.played ? Math.round(u.wins / u.played * 100) : 0;
+  const maxf = Math.max(1, ...u.freq.slice(1));
+  const my = list => list.filter(x => x.userId === u.id);
+  const tickets = my(CC().tickets), refunds = my(CC().refunds);
+  const tabs = [['stats','Статистика'],['hist','Раунды'],['support','Поддержка']];
+  let body = '';
+  if (meTab === 'stats'){
+    body = `
+      <div class="kpis">
+        <div class="kpi hi"><b class="num">${u.played}</b><span>раундов</span></div>
+        <div class="kpi"><b class="num">${u.wins}</b><span>в призах</span></div>
+        <div class="kpi"><b class="num">${rate}%</b><span>доля призовых</span></div>
+        <div class="kpi"><b class="num">${u.top1}</b><span>первых мест</span></div>
+        <div class="kpi hi"><b class="num ${net>=0?'pos':'neg'}">${net>0?'+':''}${money(net)}</b><span>итог, монет</span></div>
+        <div class="kpi"><b class="num pos">+${money(u.best)}</b><span>лучший раунд</span></div>
+        <div class="kpi"><b class="num">${u.bestStreak}</b><span>серия побед</span></div>
+        <div class="kpi"><b class="num">${money(u.betSum)}</b><span>поставлено</span></div>
+      </div>
+      <div class="panel">
+        <div class="eyebrow">частота выпавших чисел</div>
+        <div class="chart">${u.freq.slice(1).map(v=>`<i class="${v>0&&v>=maxf?'hot':''}" style="height:${Math.round(v/maxf*100)}%"></i>`).join('')}</div>
+        <div class="row between tiny muted" style="margin-top:6px"><span>1</span><span>25</span><span>50</span></div>
+      </div>
+      <div class="h2">Рейтинг соперников</div>
+      <div class="list">${topRows(u).map((r,i)=>`<div class="li">
+        <span class="idx">${i+1}</span>
+        <div class="main"><b>${esc(r.nick)}</b><div>${r.me?'это вы':'соперник'}</div></div>
+        <span class="val ${r.v>=0?'pos':'muted'}">${r.v>0?'+':''}${money(r.v)}</span></div>`).join('') ||
+        '<div class="empty">сыграйте пару раундов</div>'}</div>
+      <div class="acts" style="margin-top:18px">
+        <button class="btn ghost grow" onclick="toggleSound()">звук: ${u.sound?'включён':'выключен'}</button>
+        <button class="btn danger" onclick="wipe()">сбросить профиль</button></div>`;
+  } else if (meTab === 'hist'){
+    body = u.hist.length ? `<div class="list">${u.hist.map(h => `
+      <div class="li"><span class="idx num">${h.roll}</span>
+        <div class="main"><b>${h.place ? ['','первое место','второе место','третье место'][h.place] : 'без приза'}</b>
+          <div>${dt(h.t)} · «${esc(h.table)}» · ваше ${h.pick} · банк ${money(h.pot)}</div></div>
+        <span class="val ${h.delta>=0?'pos':'muted'}">${h.delta>0?'+':''}${money(h.delta)}</span>
+        <button class="btn ghost sm" onclick="complainRound('${h.id}')">спорный</button>
+      </div>`).join('')}</div>` : '<div class="empty">история пуста</div>';
+  } else {
+    body = `
+      <div class="acts" style="margin-bottom:18px">
+        <button class="btn grow" onclick="complainRound('')">новое обращение</button></div>
+      <div class="eyebrow" style="margin-bottom:8px">обращения</div>
+      ${tickets.length ? `<div class="list">${tickets.map(t => `
+        <div class="li"><div class="main"><b>${esc(t.topic)}</b>
+          <div>${dt(t.createdAt)} · ${esc(t.text.slice(0,90))}</div>
+          ${t.answer ? `<div style="color:var(--gold);margin-top:6px">Ответ: ${esc(t.answer)}${t.compensation?` · компенсация ${money(t.compensation)} монет`:''}</div>` : ''}</div>
+          <span class="tag ${t.status==='resolved'?'ok':t.status==='rejected'?'no':'new'}">${
+            {new:'на проверке', in_work:'в работе', resolved:'решено', rejected:'отклонено'}[t.status]}</span>
+        </div>`).join('')}</div>` : '<div class="empty">обращений нет</div>'}
+      <div class="eyebrow" style="margin:22px 0 8px">заявки на возврат</div>
+      ${refunds.length ? `<div class="list">${refunds.map(r => `
+        <div class="li"><div class="main"><b>${money(r.sum)} ₽</b>
+          <div>${dt(r.createdAt)} · ${esc(r.reason || 'без причины')}</div>
+          ${r.comment ? `<div style="color:var(--gold);margin-top:6px">Модератор: ${esc(r.comment)}</div>` : ''}</div>
+          <span class="tag ${r.status==='approved'?'ok':r.status==='rejected'?'no':'new'}">${
+            {new:'на проверке', approved:'одобрен', rejected:'отклонён'}[r.status]}</span>
+        </div>`).join('')}</div>` : '<div class="empty">заявок нет</div>'}`;
+  }
+  $('#app').innerHTML = `
+   <div class="screen"><div class="head">
+    <div class="h1">Профиль</div>
+    <div class="panel acc" style="margin-bottom:14px">
+      <div class="row center" style="gap:14px">
+        ${avatarHTML(u.avatar, 62)}
+        <div class="grow" style="min-width:0">
+          <div style="font-size:19px;font-weight:800">${esc(u.nick)}</div>
+          <div class="tiny muted">${esc(u.email || 'почта не указана')} · ${u.id.slice(0,10)}</div>
+          ${u.blocked ? '<div class="tiny neg" style="margin-top:4px">аккаунт заблокирован</div>' : ''}
+        </div>
+        <button class="btn ghost sm" onclick="editProfile()">Изменить</button>
+      </div>
+    </div>
+    <div class="filters" style="padding-bottom:8px">${tabs.map(([k,n])=>`<button class="${meTab===k?'on':''}" onclick="meTab='${k}';renderMe()">${n}</button>`).join('')}</div>
+    </div>
+    <div class="scroll">${body}</div>
+   </div>`;
+}
+function topRows(u){
+  const rows = Object.keys(u.botProfit).map(n => ({ nick:n, v:u.botProfit[n] }));
+  rows.push({ nick:'Вы', v:u.winSum - u.betSum, me:true });
+  return rows.sort((a,b)=>b.v-a.v).slice(0, 12);
+}
+function toggleSound(){ U().sound = !U().sound; Core.saveUser(); renderMe(); }
+function wipe(){ if (!confirm('Сбросить баланс, статистику и историю?')) return;
+  Core.resetUser(); paintCoins(); renderMe(); toast('Профиль сброшен'); }
+
+function complainRound(roundId){
+  const h = roundId ? U().hist.find(x => x.id === roundId) : null;
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div class="eyebrow">обращение в поддержку</div>
+    <h3>${h ? 'Спорный раунд' : 'Новое обращение'}</h3>
+    ${h ? `<div class="tiny muted">выпало ${h.roll}, ваше число ${h.pick}, банк ${money(h.pot)},
+      игроков ${h.players}, ${dt(h.t)} — эти данные приложатся к обращению</div>` : ''}
+    <label class="field"><span>тема</span>
+      <select id="tktopic">${Core.TICKET_TOPICS.map((t,i)=>`<option ${h&&i===0?'selected':''}>${t}</option>`).join('')}</select></label>
+    <label class="field"><span>что случилось</span>
+      <textarea id="tktext" placeholder="Опишите проблему: что ожидали и что получили"></textarea></label>
+    <div class="acts" style="margin-top:16px">
+      <button class="btn grow" onclick="sendTicket('${roundId||''}')">отправить</button>
+      <button class="btn ghost" onclick="closeLayer()">отмена</button></div>
+  </div></div>`;
+}
+function sendTicket(roundId){
+  const h = roundId ? U().hist.find(x => x.id === roundId) : null;
+  const r = Core.createTicket($('#tktopic').value, $('#tktext').value, h || null);
+  toast(r.ok ? 'Обращение принято, ответ придёт в профиль' : r.err, r.ok ? 'good' : 'bad');
+  if (r.ok){ closeLayer(); if (screen === 'me'){ meTab = 'support'; renderMe(); } }
+}
+
+/* --- правила --- */
+function renderRules(){
+  stopLoop();
+  const block = (n, t, b) => `<div class="panel" style="margin-bottom:1px"><div class="row" style="gap:16px">
+    <div class="rnum">${n}</div>
+    <div><b>${t}</b><div class="tiny muted" style="margin-top:6px">${b}</div></div></div></div>`;
+  $('#app').innerHTML = `
+   <div class="screen"><div class="head">
+    <div class="h1">Правила</div>
+    <div class="sub">Игра из рукописной задумки: угадайте число ближе всех и заберите банк.</div>
+    </div><div class="scroll">
+    ${block('I','Стол и ставка','Столы на 5 и 10 человек, ставки 10, 50, 100, 500 и 1000 монет. Ставка одинаковая для всех, банк — сумма ставок участников раунда.')}
+    ${block('II','Число','Каждый выбирает число от 1 до 50 и нажимает «готов». На это тридцать секунд. Кто не успел — в раунде не участвует и ничего не теряет. Одно число занимает только один игрок.')}
+    ${block('III','Розыгрыш','Стол выдаёт число от 1 до 50 криптостойким генератором браузера. Побеждает тот, чьё число ближе к выпавшему. При равной разнице выше тот, кто раньше нажал «готов».')}
+    ${block('IV','Три победителя','Первое место — 70% банка, второе — 20%, третье — 5%. Ещё 5% — комиссия стола. Если играли меньше трёх, невостребованные доли уходят первому месту; меньше двух — раунд отменяется и ставки возвращаются.')}
+    ${block('V','Пример','Десять игроков по 100 монет — банк 1000. Первый получает 700, второй 200, третий 50, столу 50.')}
+    ${block('VI','Монеты','Монеты покупаются за рубли и тратятся только в игре: обратно в деньги они не превращаются и не выводятся. Ошибочный платёж возвращается заявкой на возврат в течение ' + CC().settings.refundDays + ' дней.')}
+    ${block('VII','Копилка добра','Десять процентов прибыли заведения уходят в детский дом. Накоплено ' + money(CC().charity) + ' ₽.')}
+    <div class="panel acc" style="margin-top:18px">
+      <div class="eyebrow">важно</div>
+      <div class="tiny muted" style="margin-top:8px">Это игра на виртуальные монеты, а не ставки на деньги: выигрыш нельзя
+        обменять на рубли или вывести. Приём ставок с денежными выплатами в России требует лицензии
+        и разрешённой игорной зоны.</div>
+      <div class="acts" style="margin-top:14px"><a class="btn ghost sm" href="admin.html">Кабинет модератора</a></div>
+    </div></div></div>`;
+}
+
+/* --- запуск --- */
+/* ---------- регистрация: ник, почта, аватар ---------- */
+let regAvatar = null;
+function welcome(){
+  regAvatar = regAvatar || Object.assign({}, U().avatar);
+  $('#layer').innerHTML = `
+  <div class="modal"><div class="mbox">
+    <div style="font-size:42px;line-height:1;text-align:center">🍀</div>
+    <h3 style="text-align:center">Добро пожаловать!</h3>
+    <div class="tiny muted" style="text-align:center;margin-bottom:6px">
+      Выберите имя, аватар и почту — на неё придут ответы поддержки.</div>
+    <div class="avapreview" id="avapreview"></div>
+    <div class="row between center" style="margin-bottom:10px">
+      <div class="eyebrow">выберите иконку</div>
+      <button class="btn ghost sm" onclick="$('#avafile').click()">📷 Своё фото</button>
+    </div>
+    <input type="file" id="avafile" accept="image/*" class="hidden" onchange="uploadAvatar(this)">
+    <div id="icongrid"></div>
+    <label class="field"><span>имя в игре</span>
+      <input type="text" id="regnick" maxlength="24" value="${esc(U().nick === 'Игрок' ? '' : U().nick)}" placeholder="Как вас звать за столом"></label>
+    <label class="field"><span>почта</span>
+      <input type="text" id="regmail" value="${esc(U().email)}" placeholder="you@mail.ru" inputmode="email"></label>
+    <button class="btn gold full" style="margin-top:20px" onclick="finishReg()">Начать игру · 1000 монет</button>
+    <div class="tiny muted" style="text-align:center;margin-top:12px">
+      Данные остаются в этом браузере и никуда не отправляются.</div>
+  </div></div>`;
+  drawAvaPreview(); pickIconGrid();
+}
+function drawAvaPreview(){
+  const box = $('#avapreview'); if (!box) return;
+  box.innerHTML = avatarHTML(regAvatar, 84);
+}
+/* Один шаблон аватара на всё приложение: фото или иконка на цветной подложке. */
+function avatarHTML(av, size, cls){
+  const s = size || 34;
+  const style = `width:${s}px;height:${s}px;border-radius:${Math.round(s*.32)}px`;
+  if (av && av.type === 'photo')
+    return `<img class="av ${cls||''}" src="${av.value}" style="${style};object-fit:cover" alt="">`;
+  const bg = (av && av.bg) || '#6c5ce7';
+  return `<div class="av ${cls||''}" style="${style};background:linear-gradient(140deg,${bg},${bg}99);
+    font-size:${Math.round(s*.5)}px">${(av && av.value) || '🍀'}</div>`;
+}
+function pickIconGrid(){
+  const box = $('#icongrid'); if (!box) return;
+  box.innerHTML = `<div class="icons">${Core.ICONS.map((ic, i) => {
+    const bg = Core.ICON_BG[i % Core.ICON_BG.length];
+    const on = regAvatar && regAvatar.type === 'icon' && regAvatar.value === ic;
+    return `<button class="ico ${on?'on':''}" style="background:linear-gradient(140deg,${bg},${bg}99)"
+      onclick="setIcon('${ic}','${bg}')">${ic}</button>`; }).join('')}</div>`;
+}
+function setIcon(ic, bg){ regAvatar = { type:'icon', value:ic, bg:bg }; drawAvaPreview(); pickIconGrid(); }
+function uploadAvatar(input){
+  const f = input.files && input.files[0]; if (!f) return;
+  Core.photoToAvatar(f, res => {
+    if (!res.ok){ toast(res.err, 'bad'); return; }
+    regAvatar = res.avatar; drawAvaPreview(); pickIconGrid();
+    toast('Фото загружено', 'good');
+  });
+}
+function finishReg(){
+  const r = Core.setProfile($('#regnick').value, $('#regmail').value, regAvatar);
+  if (!r.ok){ toast(r.err, 'bad'); return; }
+  closeLayer(); paintCoins(); paintMe(); go('lobby');
+  toast('Готово, ' + esc(U().nick) + '! Удачи за столом', 'good');
+}
+function editProfile(){ regAvatar = Object.assign({}, U().avatar); welcome(); }
+function paintMe(){
+  const box = $('#hdava'); if (box) box.innerHTML = avatarHTML(U().avatar, 34);
+}
+
+function rescue(){
+  if (U().coins >= 10 || U().blocked) return;
+  U().coins += 100; Core.saveUser(); paintCoins();
+  toast('Спасательный круг: +100 монет');
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopLoop(); else if (G && screen === 'table') startLoop(); });
+window.addEventListener('beforeunload', () => Core.flush());
+setInterval(rescue, 5000);
+/* PWA: после первого открытия игра ставится на экран «Домой» и работает без сети.
+   На file:// сервис-воркеры недоступны — там просто пропускаем. */
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+/* Подсказка про установку — один раз, после регистрации. */
+let installEvt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault(); installEvt = e;
+  if (U().registered && !U().installHinted){ U().installHinted = true; Core.saveUser(); showInstall(); }
+});
+function showInstall(){
+  const el = document.createElement('div');
+  el.className = 'toast good'; el.style.pointerEvents = 'auto';
+  el.innerHTML = 'Поставить игру на экран телефона? &nbsp;';
+  const b = document.createElement('b'); b.textContent = 'Установить'; b.style.cursor = 'pointer';
+  b.onclick = () => { el.remove(); if (installEvt){ installEvt.prompt(); installEvt = null; } };
+  el.appendChild(b); $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), 12000);
+}
+
+paintCoins(); paintMe(); go('lobby');
+if (!U().registered) welcome();
+</script>
+</body>
+</html>
