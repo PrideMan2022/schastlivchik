@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=25">
+<link rel="stylesheet" href="styles.css?v=29">
 </head>
 <body>
 <header><div class="wrap hd">
@@ -41,7 +41,7 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=25"></script>
+<script src="core.js?v=29"></script>
 <script>
 'use strict';
 const U = () => Core.user, CC = () => Core.core;
@@ -303,7 +303,7 @@ function renderLobby(){
           <div class="top">
             <div class="chip" style="background:linear-gradient(145deg,${c.a},${c.b})">${t.stake}</div>
             <div><div class="nm">«${t.name}»</div>
-              <div class="sz">${t.size} ${plural(t.size,'место','места','мест')} · ставка ${t.stake}</div></div>
+              <div class="sz">${t.size} ${plural(t.size,'место','места','мест')}</div></div>
           </div>
           <div class="occ">${Array.from({length:t.size},(_,i)=>`<i class="${i<busy?'f':''}"></i>`).join('')}</div>
           <div class="meta"><span>${busy}/${t.size} за столом</span><span>банк <b>${money(t.stake*t.size)}</b></span></div>
@@ -654,8 +654,8 @@ function renderMe(){
         <span class="val ${r.v>=0?'pos':'muted'}">${r.v>0?'+':''}${money(r.v)}</span></div>`).join('') ||
         '<div class="empty">сыграйте пару раундов</div>'}</div>
       <div class="acts" style="margin-top:18px">
-        <button class="btn ghost grow" onclick="toggleSound()">звук: ${u.sound?'включён':'выключен'}</button>
-        <button class="btn danger" onclick="wipe()">сбросить профиль</button></div>`;
+        <button class="btn ghost grow" onclick="toggleSound()">Звук: ${u.sound?'вкл':'выкл'}</button>
+        <button class="btn danger" onclick="wipe()">Сбросить</button></div>`;
   } else if (meTab === 'hist'){
     body = u.hist.length ? `<div class="list">${u.hist.map(h => `
       <div class="li"><span class="idx num">${h.roll}</span>
@@ -693,7 +693,8 @@ function renderMe(){
         ${avatarHTML(u.avatar, 62)}
         <div class="grow" style="min-width:0">
           <div style="font-size:19px;font-weight:800">${esc(u.nick)}</div>
-          <div class="tiny muted">${esc(u.email || 'почта не указана')} · ${u.id.slice(0,10)}</div>
+          <div class="tiny muted mailwrap">${esc(u.email || 'почта не указана')}</div>
+          <div class="tiny muted">${u.id.slice(0,10)}</div>
           ${u.blocked ? '<div class="tiny neg" style="margin-top:4px">аккаунт заблокирован</div>' : ''}
         </div>
         <button class="btn ghost sm" onclick="editProfile()">Изменить</button>
