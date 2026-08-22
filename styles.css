@@ -24,10 +24,19 @@
 html,body{margin:0;padding:0}
 /* Приложение занимает ровно один экран: страница не прокручивается,
    скроллятся только внутренние области списков. */
-html{height:100%}
+/* Базовый кегль тянется вместе с шириной экрана: от 320 px до планшета
+   весь текст, заданный в rem/em, масштабируется сам, без медиазапросов. */
+html{height:100%;overscroll-behavior:none;font-size:clamp(14px, 13px + .55vw, 17px);
+  -webkit-text-size-adjust:100%}
+/* Высота берётся из visualViewport (переменная --app-h ставится скриптом):
+   в Chrome на iOS нижняя панель браузера меняет видимую область, и любая
+   вёрстка на vh/dvh/svh уезжает под неё вместе с шапкой. Плюс body
+   зафиксирован, чтобы страница не «отскакивала» при свайпе. */
 body{
-  background:var(--bg); color:var(--txt); font:15px/1.5 var(--sans);
-  height:100vh; height:100svh; overflow:hidden; display:flex; flex-direction:column;
+  background:var(--bg); color:var(--txt); font:1rem/1.5 var(--sans);
+  position:fixed; top:0; left:0; right:0; width:100%;
+  height:var(--app-h, 100svh); overflow:hidden; overscroll-behavior:none;
+  display:flex; flex-direction:column;
   background-image:
     radial-gradient(900px 520px at 12% -140px, rgba(108,92,231,.28), transparent 70%),
     radial-gradient(760px 460px at 92% -60px, rgba(34,211,238,.14), transparent 68%),

@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=30">
+<link rel="stylesheet" href="styles.css?v=32">
 </head>
 <body>
 <header><div class="wrap hd">
@@ -41,9 +41,23 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=30"></script>
+<script src="core.js?v=32"></script>
 <script>
 'use strict';
+/* Держим высоту приложения равной реально видимой области.
+   iOS-браузеры прячут и показывают панели, меняя visualViewport. */
+function fitViewport(){
+  const vv = window.visualViewport;
+  const h = vv ? vv.height : window.innerHeight;
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+fitViewport();
+addEventListener('resize', fitViewport);
+addEventListener('orientationchange', () => setTimeout(fitViewport, 260));
+if (window.visualViewport){
+  visualViewport.addEventListener('resize', fitViewport);
+  visualViewport.addEventListener('scroll', fitViewport);
+}
 const U = () => Core.user, CC = () => Core.core;
 const $  = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));

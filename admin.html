@@ -21,6 +21,20 @@
 <script src="core.js?v=5"></script>
 <script>
 'use strict';
+/* Держим высоту приложения равной реально видимой области.
+   iOS-браузеры прячут и показывают панели, меняя visualViewport. */
+function fitViewport(){
+  const vv = window.visualViewport;
+  const h = vv ? vv.height : window.innerHeight;
+  document.documentElement.style.setProperty('--app-h', h + 'px');
+}
+fitViewport();
+addEventListener('resize', fitViewport);
+addEventListener('orientationchange', () => setTimeout(fitViewport, 260));
+if (window.visualViewport){
+  visualViewport.addEventListener('resize', fitViewport);
+  visualViewport.addEventListener('scroll', fitViewport);
+}
 const CC = () => Core.core, U = () => Core.user;
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
