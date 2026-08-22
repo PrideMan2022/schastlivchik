@@ -1,10 +1,11 @@
 /* Service worker: игра открывается без сети после первого запуска.
    Стратегия — «сначала сеть, при отказе кэш»: так обновления доезжают сразу,
    а в метро игра всё равно работает. */
-const CACHE = 'schastlivchik-v1';
+const CACHE = 'schastlivchik-v2';
 const SHELL = [
   './', './index.html', './admin.html', './styles.css', './core.js',
-  './manifest.json', './assets/logo.svg', './assets/icon-192.png', './assets/icon-512.png'
+  './manifest.json', './assets/logo.svg', './assets/icon-192.png', './assets/icon-512.png',
+  './doc.css', './terms.html', './privacy.html', './refund.html', './game-rules.html'
 ];
 
 self.addEventListener('install', e => {

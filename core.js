@@ -30,15 +30,28 @@ const ICONS = ['🦊','🐻','🐼','🦁','🐯','🐺','🦉','🦅','🐙','�
   '🍀','⭐','🔥','💎','👑','🎩','🚀','🎯'];
 const ICON_BG = ['#6c5ce7','#22d3ee','#ff5fa2','#34d399','#ffc24b','#ff7a18','#4f8cff','#a78bfa'];
 
+/* Версии правовых документов. При изменении текста поднимаем версию —
+   приложение попросит принять её заново, а согласие запишется с датой. */
+const DOCS = {
+  terms:   { v: '1.0', date: '23.08.2026', file: 'terms.html',   title: 'Пользовательское соглашение' },
+  privacy: { v: '1.0', date: '23.08.2026', file: 'privacy.html', title: 'Политика конфиденциальности' },
+  refund:  { v: '1.0', date: '23.08.2026', file: 'refund.html',  title: 'Правила покупок и возвратов' },
+  rules:   { v: '1.0', date: '23.08.2026', file: 'game-rules.html', title: 'Правила игры' }
+};
+
 const USER_DEF = {
   id: null, nick: 'Игрок', email: '', registered: false,
+  consents: {},        // {terms:{v,at}, privacy:{v,at}, age18:{v,at}}
   avatar: { type: 'icon', value: '🍀', bg: '#6c5ce7' },
   coins: 1000, blocked: false, blockReason: '',
   played: 0, wins: 0, top1: 0, best: 0, streak: 0, bestStreak: 0,
   betSum: 0, winSum: 0, freq: null, hist: [], botProfit: {},
-  sound: true, seen: false, createdAt: 0
+  sound: true, seen: false, createdAt: 0,
+  /* удержание: ежедневные награды, уровень, задания дня */
+  daily: { streak: 0, lastDay: '', claimedToday: false },
+  xp: 0, level: 1, quests: { day: '', list: [] }
 };
-const SETTINGS_VERSION = 4;   // поднимаем, когда меняем значения по умолчанию
+const SETTINGS_VERSION = 5;   // поднимаем, когда меняем значения по умолчанию
 const CORE_DEF = {
   settingsVersion: SETTINGS_VERSION,
   orders: [], tickets: [], refunds: [], payouts: [], audit: [],
@@ -52,10 +65,10 @@ const CORE_DEF = {
     minPayout: 500,     // как в исходных записях: от 500 ₽
     maxPayout: 5000,    // до 5000 ₽ за заявку
     winOnly: true,      // выводить можно только чистый выигрыш, не купленные монеты
-    /* Рубильник вывода. false — приложение работает как игра на виртуальные монеты
-       без обратного обмена (модель, которой не нужна игорная лицензия);
-       true — включается вывод денег, и это уже азартная игра с выплатами. */
-    payoutsEnabled: true
+    /* Рубильник вывода. Выключен: монеты остаются игровой валютой и обратно
+       в деньги не превращаются — модель, которой не нужна игорная лицензия.
+       Включение делает приложение азартной игрой с денежными выплатами. */
+    payoutsEnabled: false
   }
 };
 
@@ -223,6 +236,64 @@ function setProfile(nick, email, avatar){
   log(first ? 'игрок' : nick, first ? 'регистрация' : 'профиль изменён', nick + ' · ' + email, U.id);
   return { ok: true };
 }
+/* Согласия фиксируются с версией документа и датой — это доказательство
+   того, что игрок принял именно ту редакцию, что действовала на тот момент. */
+function acceptDocs(list){
+  const at = Date.now();
+  (list || []).forEach(k => { U.consents[k] = { v: (DOCS[k] || {}).v || '1.0', at: at }; });
+  saveUser();
+}
+function consentsOk(){
+  return ['terms', 'privacy', 'age18'].every(k => {
+    const c = U.consents[k];
+    if (!c) return false;
+    const need = (DOCS[k] || {}).v;
+    return !need || c.v === need;     // документ обновился — попросим принять заново
+  });
+}
+
+/* Выгрузка всех данных игрока — право на переносимость по 152-ФЗ. */
+function exportData(){
+  const my = list => list.filter(x => x.userId === U.id);
+  return {
+    выгружено: new Date().toISOString(),
+    профиль: { id: U.id, ник: U.nick, почта: U.email, зарегистрирован: new Date(U.createdAt).toISOString(),
+               монет: U.coins, аватар: U.avatar && U.avatar.type },
+    согласия: U.consents,
+    статистика: { раундов: U.played, в_призах: U.wins, первых_мест: U.top1,
+                  поставлено: U.betSum, выиграно: U.winSum },
+    раунды: U.hist,
+    покупки: my(C.orders).map(o => ({ чек: o.receipt, монет: o.coins, сумма: o.price,
+                                      способ: o.method, статус: o.status, дата: new Date(o.createdAt).toISOString() })),
+    обращения: my(C.tickets).map(t => ({ тема: t.topic, текст: t.text, статус: t.status,
+                                         ответ: t.answer, дата: new Date(t.createdAt).toISOString() })),
+    возвраты: my(C.refunds).map(r => ({ сумма: r.sum, причина: r.reason, статус: r.status,
+                                        дата: new Date(r.createdAt).toISOString() }))
+  };
+}
+
+/* Удаление аккаунта: профиль стирается полностью, а платёжные записи
+   обезличиваются — их нельзя удалить, они нужны для бухгалтерии и чеков. */
+function deleteAccount(){
+  const id = U.id;
+  [C.orders, C.tickets, C.refunds, C.payouts].forEach(list =>
+    list.forEach(x => {
+      if (x.userId !== id) return;
+      x.nick = 'удалённый игрок'; x.email = ''; x.anonymized = true;
+      if (x.text) x.text = '[удалено по запросу игрока]';
+      if (x.reason) x.reason = '[удалено по запросу игрока]';
+      if (x.requisites) x.requisites = '';
+      if (x.snapshot) x.snapshot = null;
+    }));
+  log('игрок', 'удаление аккаунта', 'профиль стёрт, записи обезличены', id);
+  saveCore();
+  localStorage.removeItem(K_USER);
+  U = JSON.parse(JSON.stringify(USER_DEF));
+  U.id = uid('u'); U.createdAt = Date.now(); U.freq = new Array(51).fill(0); U.consents = {};
+  saveUser();
+  return { ok: true };
+}
+
 /* Фото ужимается до 160 px и кладётся в localStorage как data:URL. */
 function photoToAvatar(file, cb){
   if (!file || !/^image\//.test(file.type)) return cb({ ok: false, err: 'Нужен файл изображения' });
@@ -310,6 +381,98 @@ function decidePayout(id, approve, comment, adminName){
   return { ok:true, payout:p };
 }
 
+/* ---------- ежедневная награда ----------
+   Заходишь каждый день — цепочка растёт, награда вместе с ней. Пропустил
+   день — цепочка начинается заново. Седьмой день даёт крупный бонус.      */
+const DAILY = [100, 150, 250, 400, 600, 900, 2000];
+const dayKey = d => { const x = d ? new Date(d) : new Date();
+  return x.getFullYear() + '-' + (x.getMonth()+1) + '-' + x.getDate(); };
+
+function dailyState(){
+  const today = dayKey(), yest = dayKey(Date.now() - 86400000);
+  const d = U.daily || (U.daily = { streak: 0, lastDay: '', claimedToday: false });
+  if (d.lastDay !== today) d.claimedToday = false;
+  const nextStreak = d.lastDay === yest ? d.streak + 1 : (d.lastDay === today ? d.streak : 1);
+  const idx = Math.min(nextStreak, DAILY.length) - 1;
+  return { canClaim: !d.claimedToday, streak: d.streak, nextStreak: nextStreak,
+           reward: DAILY[idx], day: idx + 1, table: DAILY };
+}
+function claimDaily(){
+  const st = dailyState();
+  if (!st.canClaim) return { ok: false, err: 'Награда за сегодня уже получена' };
+  const d = U.daily;
+  d.streak = st.nextStreak; d.lastDay = dayKey(); d.claimedToday = true;
+  U.coins += st.reward; saveUser();
+  log('система', 'ежедневная награда', st.reward + ' монет, день ' + st.day, U.id);
+  return { ok: true, reward: st.reward, streak: d.streak, day: st.day };
+}
+
+/* ---------- уровень ----------
+   Опыт капает за каждый сыгранный раунд и за призовые места. На каждом
+   уровне выдаём монеты — ещё один повод вернуться завтра.               */
+function levelNeed(lvl){ return 100 + (lvl - 1) * 120; }
+function addXp(n){
+  U.xp = (U.xp || 0) + n;
+  let gained = 0, coins = 0;
+  while (U.xp >= levelNeed(U.level)){
+    U.xp -= levelNeed(U.level); U.level++;
+    gained++; coins += 100 + U.level * 50;
+  }
+  if (gained){ U.coins += coins; log('система', 'новый уровень', 'уровень ' + U.level + ', +' + coins + ' монет', U.id); }
+  saveUser();
+  return { levels: gained, coins: coins, level: U.level, xp: U.xp, need: levelNeed(U.level) };
+}
+
+/* ---------- задания дня ----------
+   Три простые цели, обновляются раз в сутки. Выполнил — забрал монеты.   */
+const QUEST_POOL = [
+  { id: 'play5',   text: 'Сыграть 5 раундов',            goal: 5,  reward: 150, kind: 'play' },
+  { id: 'play12',  text: 'Сыграть 12 раундов',           goal: 12, reward: 350, kind: 'play' },
+  { id: 'prize2',  text: 'Дважды попасть в призы',       goal: 2,  reward: 300, kind: 'prize' },
+  { id: 'first1',  text: 'Занять первое место',          goal: 1,  reward: 400, kind: 'first' },
+  { id: 'table100',text: 'Сыграть на столе от 100 монет', goal: 3, reward: 250, kind: 'stake100' },
+  { id: 'win800',  text: 'Выиграть 800 монет за день',   goal: 800,reward: 300, kind: 'won' }
+];
+function questsToday(){
+  const today = dayKey();
+  if (!U.quests || U.quests.day !== today){
+    const pool = QUEST_POOL.slice();
+    const list = [];
+    while (list.length < 3 && pool.length){
+      list.push(Object.assign({ progress: 0, done: false, claimed: false },
+                              pool.splice(rnd(0, pool.length - 1), 1)[0]));
+    }
+    U.quests = { day: today, list: list };
+    saveUser();
+  }
+  return U.quests.list;
+}
+/* Событие раунда двигает прогресс всех подходящих заданий. */
+function questProgress(ev){
+  const list = questsToday();
+  list.forEach(q => {
+    if (q.done) return;
+    let inc = 0;
+    if (q.kind === 'play') inc = 1;
+    else if (q.kind === 'prize' && ev.place) inc = 1;
+    else if (q.kind === 'first' && ev.place === 1) inc = 1;
+    else if (q.kind === 'stake100' && ev.stake >= 100) inc = 1;
+    else if (q.kind === 'won' && ev.won > 0) inc = ev.won;
+    if (!inc) return;
+    q.progress = Math.min(q.goal, q.progress + inc);
+    if (q.progress >= q.goal) q.done = true;
+  });
+  saveUser();
+  return list;
+}
+function claimQuest(id){
+  const q = questsToday().find(x => x.id === id);
+  if (!q || !q.done || q.claimed) return { ok: false, err: 'Задание ещё не выполнено' };
+  q.claimed = true; U.coins += q.reward; saveUser();
+  log('система', 'награда за задание', q.text + ' · +' + q.reward, U.id);
+  return { ok: true, reward: q.reward };
+}
+
 /* ---------- экономика раунда ---------- */
 /* Возвращает распределение банка. Доли 70/20/5, комиссия 5%,
    копейки округления и невостребованные доли — первому месту.   */
@@ -330,8 +493,10 @@ function payout(players, roll, stake){
 function registerFee(fee){ C.houseFee += fee; C.charity += fee * 0.10; saveCore(); }
 
 root.Core = {
-  PACKS, METHODS, TICKET_TOPICS, ICONS, ICON_BG,
+  PACKS, METHODS, TICKET_TOPICS, ICONS, ICON_BG, DOCS,
   setProfile, photoToAvatar, validEmail,
+  acceptDocs, consentsOk, exportData, deleteAccount,
+  DAILY, dailyState, claimDaily, addXp, levelNeed, questsToday, questProgress, claimQuest,
   get user(){ return U; }, get core(){ return C; },
   saveUser, saveCore, flush, reload, log, uid, rnd, rand,
   createOrder, confirmOrder, requestRefund, decideRefund,

@@ -12,7 +12,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=32">
+<link rel="stylesheet" href="styles.css?v=34">
 </head>
 <body>
 <header><div class="wrap hd">
@@ -41,7 +41,7 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=32"></script>
+<script src="core.js?v=34"></script>
 <script>
 'use strict';
 /* Держим высоту приложения равной реально видимой области.
@@ -235,6 +235,12 @@ function finishRound(){
     u.hist.unshift({ id: Core.uid('r'), roll:G.roll, pick:me.pick, place:me.place, delta:delta,
                      stake:t.stake, pot:res.pot, players:res.list.length, table:t.name, t:Date.now() });
     if (u.hist.length > 80) u.hist.length = 80;
+    const lvl = Core.addXp(me.place ? 30 : 12);
+    Core.questProgress({ place: me.place, stake: t.stake, won: me.won });
+    if (lvl.levels){
+      setTimeout(() => toast('Уровень ' + lvl.level + '! +' + money(lvl.coins) + ' монет', 'good'), 900);
+      setTimeout(() => confetti(24), 900);
+    }
     me.place ? sfx.win() : sfx.lose();
   }
   G.phase = 'results'; G.t0 = Date.now();
@@ -308,6 +314,7 @@ function renderLobby(){
       ${STAKES.map(s => `<button class="${filterStake===s?'on':''}" onclick="setFilter(${s})">${s}</button>`).join('')}
     </div></div>
     <div class="scroll">
+    ${rewardsStrip()}
     <div class="tables">
       ${list.map(t => {
         const busy = rnd(Math.min(2, t.size - 1), t.size - 1);
@@ -335,6 +342,90 @@ function renderLobby(){
    </div>`;
 }
 function setFilter(v){ filterStake = v; renderLobby(); }
+
+/* Полоса удержания: уровень, ежедневная награда, задания дня. */
+function rewardsStrip(){
+  const u = U(), st = Core.dailyState(), qs = Core.questsToday();
+  const need = Core.levelNeed(u.level), pct = Math.round(u.xp / need * 100);
+  const readyQuests = qs.filter(q => q.done && !q.claimed).length;
+  return `
+    <div class="strip">
+      <button class="lvl" onclick="go('me');meTab='stats';renderMe()">
+        <div class="row between center"><b>Уровень ${u.level}</b>
+          <span class="tiny muted num">${u.xp} / ${need} опыта</span></div>
+        <div class="xpbar"><i style="width:${pct}%"></i></div>
+      </button>
+      <button class="daily ${st.canClaim?'ready':''}" onclick="openDaily()">
+        <div class="ic">🎁</div>
+        <div><b>${st.canClaim ? 'Награда за вход' : 'Забрано сегодня'}</b>
+          <div class="tiny muted">${st.canClaim ? '+' + money(st.reward) + ' монет · день ' + st.day
+            : 'цепочка ' + st.streak + ' ' + plural(st.streak,'день','дня','дней')}</div></div>
+        ${st.canClaim ? '<span class="pip"></span>' : ''}
+      </button>
+      <button class="daily ${readyQuests?'ready':''}" onclick="openQuests()">
+        <div class="ic">🎯</div>
+        <div><b>Задания дня</b>
+          <div class="tiny muted">${readyQuests ? 'готово к получению: ' + readyQuests
+            : qs.filter(q=>q.claimed).length + ' из ' + qs.length + ' выполнено'}</div></div>
+        ${readyQuests ? '<span class="pip"></span>' : ''}
+      </button>
+    </div>`;
+}
+function openDaily(){
+  const st = Core.dailyState();
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div style="font-size:42px;line-height:1;text-align:center">🎁</div>
+    <h3 style="text-align:center">Награда за вход</h3>
+    <div class="tiny muted" style="text-align:center">Заходите каждый день — награда растёт.
+      Пропустили день — цепочка начинается заново.</div>
+    <div class="week">
+      ${st.table.map((v, i) => {
+        const day = i + 1, got = day < st.nextStreak || (day === st.nextStreak && !st.canClaim);
+        const now = day === st.nextStreak && st.canClaim;
+        return `<div class="wd ${got?'got':''} ${now?'now':''}">
+          <span class="d">${day}</span><b class="num">${money(v)}</b></div>`;
+      }).join('')}
+    </div>
+    <button class="btn gold full" onclick="takeDaily()" ${st.canClaim?'':'disabled'}>
+      ${st.canClaim ? 'Забрать ' + money(st.reward) + ' монет' : 'Приходите завтра'}</button>
+    <button class="btn ghost full sm" style="margin-top:10px" onclick="closeLayer()">Закрыть</button>
+  </div></div>`;
+}
+function takeDaily(){
+  const r = Core.claimDaily();
+  if (!r.ok){ toast(r.err, 'bad'); return; }
+  paintCoins(); closeLayer(); confetti(40); sfx.win();
+  toast('+' + money(r.reward) + ' монет · день ' + r.day, 'good');
+  if (screen === 'lobby') renderLobby();
+}
+function openQuests(){
+  const qs = Core.questsToday();
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div style="font-size:40px;line-height:1;text-align:center">🎯</div>
+    <h3 style="text-align:center">Задания дня</h3>
+    <div class="tiny muted" style="text-align:center;margin-bottom:6px">Обновляются каждые сутки.</div>
+    <div class="podium">
+      ${qs.map(q => `<div class="pl ${q.done?'p1':''}">
+        <div class="main"><b>${esc(q.text)}</b>
+          <div class="tiny muted">${Math.min(q.progress,q.goal)} из ${q.goal} · награда ${money(q.reward)}</div>
+          <div class="xpbar" style="margin-top:6px"><i style="width:${Math.round(Math.min(1,q.progress/q.goal)*100)}%"></i></div>
+        </div>
+        ${q.claimed ? '<span class="tag ok">забрано</span>'
+          : q.done ? `<button class="btn sm" onclick="takeQuest('${q.id}')">забрать</button>`
+          : '<span class="tag">в процессе</span>'}
+      </div>`).join('')}
+    </div>
+    <button class="btn ghost full sm" onclick="closeLayer()">Закрыть</button>
+  </div></div>`;
+}
+function takeQuest(id){
+  const r = Core.claimQuest(id);
+  if (!r.ok){ toast(r.err, 'bad'); return; }
+  paintCoins(); sfx.win(); toast('+' + money(r.reward) + ' монет за задание', 'good');
+  openQuests(); if (screen === 'lobby') renderLobby();
+}
 
 /* --- стол --- */
 function renderTable(){
@@ -484,7 +575,8 @@ function renderShop(){
 }
 function shopBuy(){
   $('#shopbody').innerHTML = `
-    <div class="sub">Монеты — игровая валюта. Купленные монеты играют, а вывести можно только выигранное сверху.</div>
+    <div class="sub">Монеты — игровая валюта: тратятся только в игре, в деньги не обмениваются
+      и не выводятся. Возврат возможен по <a href="refund.html" style="color:var(--indigo2)">правилам покупок</a>.</div>
     <div class="eyebrow" style="margin-bottom:8px">способ оплаты</div>
     <div class="methods">${Core.METHODS.map(m =>
       `<button class="${shopMethod===m.id?'on':''}" onclick="shopMethod='${m.id}';renderShop()">${m.n}</button>`).join('')}</div>
@@ -642,10 +734,17 @@ function renderMe(){
   const maxf = Math.max(1, ...u.freq.slice(1));
   const my = list => list.filter(x => x.userId === u.id);
   const tickets = my(CC().tickets), refunds = my(CC().refunds);
-  const tabs = [['stats','Статистика'],['hist','Раунды'],['support','Поддержка']];
+  const tabs = [['stats','Статистика'],['hist','Раунды'],['support','Поддержка'],['data','Данные']];
   let body = '';
   if (meTab === 'stats'){
     body = `
+      <div class="panel acc" style="margin-bottom:14px">
+        <div class="row between center"><b>Уровень ${u.level}</b>
+          <span class="tiny muted num">${u.xp} / ${Core.levelNeed(u.level)} опыта</span></div>
+        <div class="xpbar" style="margin-top:8px"><i style="width:${Math.round(u.xp/Core.levelNeed(u.level)*100)}%"></i></div>
+        <div class="tiny muted" style="margin-top:8px">За раунд +12 опыта, за призовое место +30.
+          Каждый уровень приносит монеты.</div>
+      </div>
       <div class="kpis">
         <div class="kpi hi"><b class="num">${u.played}</b><span>раундов</span></div>
         <div class="kpi"><b class="num">${u.wins}</b><span>в призах</span></div>
@@ -678,6 +777,47 @@ function renderMe(){
         <span class="val ${h.delta>=0?'pos':'muted'}">${h.delta>0?'+':''}${money(h.delta)}</span>
         <button class="btn ghost sm" onclick="complainRound('${h.id}')">спорный</button>
       </div>`).join('')}</div>` : '<div class="empty">история пуста</div>';
+  } else if (meTab === 'data'){
+    const cs = u.consents || {}, D = Core.DOCS;
+    const line = (k, name) => `<div class="li"><div class="main"><b>${name}</b>
+      <div>${cs[k] ? 'принято ' + dt(cs[k].at) + ' · редакция ' + cs[k].v : 'не принято'}</div></div>
+      <span class="tag ${cs[k]?'ok':'no'}">${cs[k] ? '✓' : '—'}</span></div>`;
+    body = `
+      <div class="eyebrow" style="margin-bottom:10px">документы</div>
+      <div class="list">
+        <a class="li" href="terms.html" style="text-decoration:none;color:inherit">
+          <div class="main"><b>${D.terms.title}</b><div>редакция ${D.terms.v} от ${D.terms.date}</div></div>
+          <span class="tag">открыть</span></a>
+        <a class="li" href="privacy.html" style="text-decoration:none;color:inherit">
+          <div class="main"><b>${D.privacy.title}</b><div>редакция ${D.privacy.v} от ${D.privacy.date}</div></div>
+          <span class="tag">открыть</span></a>
+        <a class="li" href="refund.html" style="text-decoration:none;color:inherit">
+          <div class="main"><b>${D.refund.title}</b><div>редакция ${D.refund.v} от ${D.refund.date}</div></div>
+          <span class="tag">открыть</span></a>
+        <a class="li" href="game-rules.html" style="text-decoration:none;color:inherit">
+          <div class="main"><b>${D.rules.title}</b><div>редакция ${D.rules.v} от ${D.rules.date}</div></div>
+          <span class="tag">открыть</span></a>
+      </div>
+      <div class="eyebrow" style="margin:22px 0 10px">ваши согласия</div>
+      <div class="list">
+        ${line('age18','Подтверждение возраста 18+')}
+        ${line('terms','Пользовательское соглашение')}
+        ${line('privacy','Обработка персональных данных')}
+      </div>
+      <div class="eyebrow" style="margin:22px 0 10px">управление данными</div>
+      <div class="panel flat" style="margin-bottom:12px">
+        <b>Скачать мои данные</b>
+        <div class="tiny muted" style="margin:6px 0 12px">Профиль, согласия, статистика, история раундов,
+          покупки и обращения — одним файлом JSON.</div>
+        <button class="btn ghost sm" onclick="downloadData()">Скачать файл</button>
+      </div>
+      <div class="panel flat">
+        <b class="neg">Удалить аккаунт</b>
+        <div class="tiny muted" style="margin:6px 0 12px">Профиль, баланс и вся игровая история стираются
+          без возможности восстановления. Записи о платежах остаются обезличенными — этого требует закон
+          о бухгалтерском учёте.</div>
+        <button class="btn danger sm" onclick="askDelete()">Удалить аккаунт</button>
+      </div>`;
   } else {
     body = `
       <div class="acts" style="margin-bottom:18px">
@@ -725,6 +865,44 @@ function topRows(u){
   return rows.sort((a,b)=>b.v-a.v).slice(0, 12);
 }
 function toggleSound(){ U().sound = !U().sound; Core.saveUser(); renderMe(); }
+
+/* Выгрузка данных — файл сохраняется прямо из браузера, ничего никуда не отправляется. */
+function downloadData(){
+  const blob = new Blob([JSON.stringify(Core.exportData(), null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'schastlivchik-' + new Date().toISOString().slice(0, 10) + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  toast('Файл с вашими данными сохранён', 'good');
+}
+/* Удаление требует осознанного подтверждения: слово целиком, а не «ок». */
+function askDelete(){
+  $('#layer').innerHTML = `
+  <div class="modal" onclick="closeLayer()"><div class="mbox" onclick="event.stopPropagation()">
+    <div style="font-size:40px;line-height:1;text-align:center">🗑</div>
+    <h3 style="text-align:center">Удалить аккаунт?</h3>
+    <div class="tiny muted" style="text-align:center;margin-bottom:14px">
+      Будут стёрты профиль, ${money(U().coins)} монет и вся история игр. Отменить это нельзя.</div>
+    <div class="panel flat tiny muted" style="margin-bottom:14px">
+      Сведения о платежах закон обязывает хранить пять лет — они останутся в системе
+      без вашего имени и почты.</div>
+    <label class="field"><span>напечатайте слово УДАЛИТЬ</span>
+      <input type="text" id="delword" autocomplete="off" placeholder="УДАЛИТЬ"></label>
+    <div class="acts" style="margin-top:16px">
+      <button class="btn danger grow" onclick="doDelete()">Удалить навсегда</button>
+      <button class="btn ghost" onclick="closeLayer()">Отмена</button></div>
+  </div></div>`;
+}
+function doDelete(){
+  const w = ($('#delword').value || '').trim().toUpperCase();
+  if (w !== 'УДАЛИТЬ'){ toast('Напечатайте слово УДАЛИТЬ', 'bad'); return; }
+  Core.deleteAccount();
+  closeLayer(); paintCoins(); paintMe();
+  toast('Аккаунт удалён', 'good');
+  regAvatar = null; meTab = 'stats';
+  go('lobby'); welcome();
+}
 function wipe(){ if (!confirm('Сбросить баланс, статистику и историю?')) return;
   Core.resetUser(); paintCoins(); renderMe(); toast('Профиль сброшен'); }
 
@@ -801,9 +979,17 @@ function welcome(){
       <input type="text" id="regnick" maxlength="24" value="${esc(U().nick === 'Игрок' ? '' : U().nick)}" placeholder="Как вас звать за столом"></label>
     <label class="field"><span>почта</span>
       <input type="text" id="regmail" value="${esc(U().email)}" placeholder="you@mail.ru" inputmode="email"></label>
-    <button class="btn gold full" style="margin-top:20px" onclick="finishReg()">Начать игру · 1000 монет</button>
+    <div class="consents">
+      <label class="ck"><input type="checkbox" id="ck18"><span>Мне исполнилось 18 лет</span></label>
+      <label class="ck"><input type="checkbox" id="ckterms"><span>Принимаю
+        <a href="terms.html" target="_blank">пользовательское соглашение</a> и
+        <a href="game-rules.html" target="_blank">правила игры</a></span></label>
+      <label class="ck"><input type="checkbox" id="ckpriv"><span>Согласен на обработку данных по
+        <a href="privacy.html" target="_blank">политике конфиденциальности</a></span></label>
+    </div>
+    <button class="btn gold full" style="margin-top:16px" onclick="finishReg()">Начать игру · 1000 монет</button>
     <div class="tiny muted" style="text-align:center;margin-top:12px">
-      Данные остаются в этом браузере и никуда не отправляются.</div>
+      Монеты — игровая валюта: в деньги не обмениваются и не выводятся.</div>
   </div></div>`;
   drawAvaPreview(); pickIconGrid();
 }
@@ -839,10 +1025,16 @@ function uploadAvatar(input){
   });
 }
 function finishReg(){
+  const ok18 = $('#ck18') && $('#ck18').checked,
+        okT  = $('#ckterms') && $('#ckterms').checked,
+        okP  = $('#ckpriv') && $('#ckpriv').checked;
+  if (!(ok18 && okT && okP)){ toast('Отметьте все три согласия', 'bad'); return; }
   const r = Core.setProfile($('#regnick').value, $('#regmail').value, regAvatar);
   if (!r.ok){ toast(r.err, 'bad'); return; }
+  Core.acceptDocs(['age18', 'terms', 'privacy', 'rules']);
   closeLayer(); paintCoins(); paintMe(); go('lobby');
   toast('Готово, ' + esc(U().nick) + '! Удачи за столом', 'good');
+  setTimeout(openDaily, 700);          // сразу показываем, что за вход дают монеты
 }
 function editProfile(){ regAvatar = Object.assign({}, U().avatar); welcome(); }
 function paintMe(){

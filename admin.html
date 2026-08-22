@@ -79,10 +79,12 @@ function logout(){ sessionStorage.removeItem(SKEY); admin = ''; gate(); }
 
 /* ---------- каркас ---------- */
 let tab = 'dash';
-const TABS = [
-  ['dash','Обзор'], ['tickets','Жалобы'], ['refunds','Возвраты'], ['payouts','Выплаты'],
-  ['orders','Платежи'], ['players','Игроки'], ['audit','Журнал']
-];
+/* Вкладка выплат появляется, только если вывод включён в настройках. */
+function tabList(){
+  const t = [['dash','Обзор'], ['tickets','Жалобы'], ['refunds','Возвраты']];
+  if (CC().settings.payoutsEnabled) t.push(['payouts','Выплаты']);
+  return t.concat([['orders','Платежи'], ['players','Игроки'], ['audit','Журнал']]);
+}
 function counts(){
   return { tickets: CC().tickets.filter(t => t.status === 'new').length,
            refunds: CC().refunds.filter(r => r.status === 'new').length,
@@ -92,7 +94,8 @@ function render(){
   if (!admin) return gate();
   Core.reload();
   const c = counts();
-  $('#tabs').innerHTML = TABS.map(([k,n]) =>
+  if (tab === 'payouts' && !CC().settings.payoutsEnabled) tab = 'dash';
+  $('#tabs').innerHTML = tabList().map(([k,n]) =>
     `<button class="${tab===k?'on':''}" onclick="tab='${k}';render()">${n}${c[k]?`<span class="cnt">${c[k]}</span>`:''}</button>`
   ).join('') + `<button onclick="logout()">выход</button>`;
   ({ dash:vDash, tickets:vTickets, refunds:vRefunds, payouts:vPayouts,
@@ -116,21 +119,22 @@ function vDash(){
       <div class="kpi"><b class="num ${refunded.length?'neg':''}">${refunded.length}</b><span>возвратов</span></div>
       <div class="kpi"><b class="num">${money(C.houseFee)}</b><span>комиссия столов</span></div>
       <div class="kpi"><b class="num pos">${money(C.charity)} ₽</b><span>копилка добра</span></div>
+      ${C.settings.payoutsEnabled ? `
       <div class="kpi"><b class="num">${money(C.paidOut)} ₽</b><span>выплачено игрокам</span></div>
-      <div class="kpi ${c.payouts?'hi':''}"><b class="num ${c.payouts?'gold':''}">${c.payouts}</b><span>выплат в очереди</span></div>
+      <div class="kpi ${c.payouts?'hi':''}"><b class="num ${c.payouts?'gold':''}">${c.payouts}</b><span>выплат в очереди</span></div>` : ''}
       <div class="kpi"><b class="num ${c.tickets?'gold':''}">${c.tickets}</b><span>жалоб в очереди</span></div>
       <div class="kpi"><b class="num ${c.refunds?'gold':''}">${c.refunds}</b><span>возвратов в очереди</span></div>
     </div>
     <div class="row" style="gap:1px;flex-wrap:wrap">
       <div class="panel grow" style="min-width:260px">
         <div class="eyebrow">очередь на разбор</div>
-        <div class="tiny muted" style="margin:8px 0 14px">${c.tickets + c.refunds + c.payouts
+        <div class="tiny muted" style="margin:8px 0 14px">${c.tickets + c.refunds + (C.settings.payoutsEnabled ? c.payouts : 0)
           ? 'Требуют решения: ' + c.tickets + ' жалоб, ' + c.refunds + ' возвратов, ' + c.payouts + ' выплат.'
           : 'Очередь пуста — необработанных обращений нет.'}</div>
         <div class="acts">
           <button class="btn line sm" onclick="tab='tickets';render()">к жалобам</button>
           <button class="btn line sm" onclick="tab='refunds';render()">к возвратам</button>
-          <button class="btn line sm" onclick="tab='payouts';render()">к выплатам</button></div>
+          ${C.settings.payoutsEnabled ? `<button class="btn line sm" onclick="tab='payouts';render()">к выплатам</button>` : ''}</div>
       </div>
       <div class="panel grow" style="min-width:260px">
         <div class="eyebrow">текущий игрок</div>
@@ -391,7 +395,7 @@ function vPlayers(){
         <div class="kpi"><b class="num">${u.wins}</b><span>в призах</span></div>
         <div class="kpi"><b class="num">${money(u.betSum)}</b><span>поставлено</span></div>
         <div class="kpi"><b class="num">${money(u.winSum)}</b><span>выиграно</span></div>
-        <div class="kpi"><b class="num gold">${money(Core.coinsToRub(Core.withdrawable()))} ₽</b><span>доступно к выводу</span></div>
+        ${CC().settings.payoutsEnabled ? `<div class="kpi"><b class="num gold">${money(Core.coinsToRub(Core.withdrawable()))} ₽</b><span>доступно к выводу</span></div>` : ''}
       </div>
       ${u.blocked ? `<div class="tiny neg" style="margin-top:14px">Причина блокировки: ${esc(u.blockReason || '—')}</div>` : ''}
       <div class="acts" style="margin-top:18px">

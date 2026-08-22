@@ -31,3 +31,13 @@ for src_name, dst_name in [('index.html', 'Счастливчик.html'), ('admi
     out = os.path.join(root, 'dist', dst_name)
     io.open(out, 'w', encoding='utf-8').write(s)
     print(dst_name, len(s.encode('utf-8')) // 1024, 'КБ')
+
+# правовые страницы: тот же приём — стили и логотип внутрь файла
+doc_css = io.open(os.path.join(root, 'doc.css'), encoding='utf-8').read()
+for name in ('terms.html', 'privacy.html', 'refund.html', 'game-rules.html'):
+    d = io.open(os.path.join(root, name), encoding='utf-8').read()
+    d = re.sub(r'<link rel="stylesheet" href="doc\.css[^"]*">', lambda m: '<style>\n' + doc_css + '\n</style>', d)
+    d = re.sub(r'assets/logo\.svg[^"]*', lambda m: logo_uri, d)
+    d = d.replace('href="index.html"', 'href="Счастливчик.html"')
+    io.open(os.path.join(root, 'dist', name), 'w', encoding='utf-8').write(d)
+    print(name, len(d.encode('utf-8')) // 1024, 'КБ')
