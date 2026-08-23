@@ -15,7 +15,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css?v=36">
+<link rel="stylesheet" href="styles.css?v=38">
 </head>
 <body>
 <header><div class="wrap hd">
@@ -44,7 +44,7 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=36"></script>
+<script src="core.js?v=38"></script>
 <script>
 'use strict';
 /* Держим высоту приложения равной реально видимой области.
@@ -963,28 +963,71 @@ function sendTicket(roundId){
 /* --- правила --- */
 function renderRules(){
   stopLoop();
-  const block = (n, t, b) => `<div class="panel" style="margin-bottom:1px"><div class="row" style="gap:16px">
-    <div class="rnum">${n}</div>
-    <div><b>${t}</b><div class="tiny muted" style="margin-top:6px">${b}</div></div></div></div>`;
+  /* Каждое правило — отдельная карточка с номером-медалью; между ними воздух,
+     чтобы список читался как набор шагов, а не как сплошная простыня. */
+  const rule = (n, title, body, extra) => `
+    <article class="rulecard">
+      <div class="rnum">${n}</div>
+      <div class="rbody">
+        <h3>${title}</h3>
+        <p>${body}</p>
+        ${extra || ''}
+      </div>
+    </article>`;
+  const D = Core.DOCS;
   $('#app').innerHTML = `
    <div class="screen"><div class="head">
     <div class="h1">Правила</div>
-    <div class="sub">Игра из рукописной задумки: угадайте число ближе всех и заберите банк.</div>
+    <div class="sub">Угадайте число ближе всех — заберите банк. Полторы минуты на чтение.</div>
     </div><div class="scroll">
-    ${block('I','Стол и ставка','Столы на 5 и 10 человек, ставки 10, 50, 100, 500 и 1000 монет. Ставка одинаковая для всех, банк — сумма ставок участников раунда.')}
-    ${block('II','Число','Каждый выбирает число от 1 до 50 и нажимает «готов». На это тридцать секунд. Кто не успел — в раунде не участвует и ничего не теряет. Одно число занимает только один игрок.')}
-    ${block('III','Розыгрыш','Стол выдаёт число от 1 до 50 криптостойким генератором браузера. Побеждает тот, чьё число ближе к выпавшему. При равной разнице выше тот, кто раньше нажал «готов».')}
-    ${block('IV','Три победителя','Первое место — 70% банка, второе — 20%, третье — 5%. Ещё 5% — комиссия стола. Если играли меньше трёх, невостребованные доли уходят первому месту; меньше двух — раунд отменяется и ставки возвращаются.')}
-    ${block('V','Пример','Десять игроков по 100 монет — банк 1000. Первый получает 700, второй 200, третий 50, столу 50.')}
-    ${block('VI','Монеты','Монеты покупаются за рубли и тратятся только в игре: обратно в деньги они не превращаются и не выводятся. Ошибочный платёж возвращается заявкой на возврат в течение ' + CC().settings.refundDays + ' дней.')}
-    ${block('VII','Копилка добра','Десять процентов прибыли заведения уходят в детский дом. Накоплено ' + money(CC().charity) + ' ₽.')}
-    <div class="panel acc" style="margin-top:18px">
+    <div class="rules">
+      ${rule('I', 'Стол и ставка',
+        'Столы на 5 и 10 человек со ставкой 10, 50, 100, 500 или 1000 монет. Ставка одинакова для всех, банк — сумма ставок участников раунда.')}
+      ${rule('II', 'Ваше число',
+        'Выберите число от 1 до 50 и нажмите «готов» — на это тридцать секунд. Одно число занимает только один игрок. Кто не успел, в раунде не участвует и ничего не теряет.')}
+      ${rule('III', 'Розыгрыш',
+        'Стол выдаёт число криптостойким генератором браузера. Побеждает тот, чьё число ближе к выпавшему; при равной разнице выше тот, кто раньше нажал «готов».')}
+      ${rule('IV', 'Три победителя',
+        'Банк делится между тремя ближайшими, ещё 5% — комиссия стола.',
+        `<div class="shares">
+           <div class="share s1"><b>70%</b><span>первое место</span></div>
+           <div class="share s2"><b>20%</b><span>второе</span></div>
+           <div class="share s3"><b>5%</b><span>третье</span></div>
+           <div class="share s4"><b>5%</b><span>столу</span></div>
+         </div>
+         <p class="fine">Играли меньше трёх — невостребованные доли уходят первому месту.
+           Меньше двух — раунд отменяется, ставки возвращаются.</p>`)}
+      ${rule('V', 'Как это считается',
+        'Десять игроков по 100 монет собирают банк 1000.',
+        `<div class="example">
+           <div class="ex"><span class="pos g">1</span><span>получает</span><b>700</b></div>
+           <div class="ex"><span class="pos s">2</span><span>получает</span><b>200</b></div>
+           <div class="ex"><span class="pos b">3</span><span>получает</span><b>50</b></div>
+           <div class="ex dim"><span class="pos h">%</span><span>столу</span><b>50</b></div>
+         </div>`)}
+      ${rule('VI', 'Шансы',
+        'За столом на десять человек шанс занять каждое призовое место — 10%, попасть в призы — 30%. Ожидаемый возврат 95%: пять процентов банка забирает стол.',
+        '<p class="fine">Игра рассчитана на развлечение, а не на заработок: на длинной дистанции баланс тает.</p>')}
+      ${rule('VII', 'Монеты',
+        'Монеты покупаются за рубли и тратятся только в игре: обратно в деньги они не превращаются и не выводятся. Ошибочный платёж возвращается заявкой в течение ' + CC().settings.refundDays + ' дней.')}
+      ${rule('VIII', 'Копилка добра',
+        'Десять процентов прибыли заведения уходят в детский дом. Накоплено ' + money(CC().charity) + ' ₽.')}
+    </div>
+
+    <div class="panel acc lawbox">
       <div class="eyebrow">важно</div>
-      <div class="tiny muted" style="margin-top:8px">Это игра на виртуальные монеты, а не ставки на деньги: выигрыш нельзя
-        обменять на рубли или вывести. Приём ставок с денежными выплатами в России требует лицензии
-        и разрешённой игорной зоны.</div>
-      <div class="acts" style="margin-top:14px"><a class="btn ghost sm" href="admin.html">Кабинет модератора</a></div>
-    </div></div></div>`;
+      <p class="tiny muted">Это игра на виртуальные монеты, а не ставки на деньги: выигрыш нельзя обменять
+        на рубли или вывести. Играть можно с 18 лет.</p>
+    </div>
+
+    <div class="eyebrow" style="margin:24px 0 10px">документы</div>
+    <div class="doclinks">
+      ${[['terms', D.terms], ['privacy', D.privacy], ['refund', D.refund], ['rules', D.rules]]
+        .map(([k, d]) => `<a class="doclink" href="${d.file}">
+          <span>${d.title}</span><small>ред. ${d.v} от ${d.date}</small></a>`).join('')}
+    </div>
+    <div class="acts" style="margin-top:16px"><a class="btn ghost sm" href="admin.html">Кабинет модератора</a></div>
+    </div></div>`;
 }
 
 /* --- запуск --- */

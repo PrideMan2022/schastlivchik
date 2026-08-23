@@ -570,6 +570,60 @@ table.tb td .q.gold{color:var(--gold)}
 .dial b, .drawn b, .bank b, .coins, .price, .tbl .stake, .wd b, .balance .v{
   font-family:var(--display);letter-spacing:-.03em}
 
+/* ============================================================
+   ПРАВИЛА: список карточек с воздухом между блоками
+   ============================================================ */
+.rules{display:flex;flex-direction:column;gap:clamp(10px,2vw,14px)}
+.rulecard{display:flex;gap:clamp(12px,2.6vw,16px);padding:clamp(15px,3.2vw,20px);border-radius:20px;
+  background:linear-gradient(158deg,var(--card2),var(--card));
+  box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 12px 28px rgba(0,0,0,.28)}
+.rulecard .rnum{flex:0 0 auto;width:clamp(38px,9vw,44px);height:clamp(38px,9vw,44px);border-radius:14px;
+  display:grid;place-items:center;font-family:var(--display);font-weight:700;
+  font-size:clamp(12px,3vw,14px);color:var(--gold);
+  background:linear-gradient(150deg,rgba(255,194,75,.22),rgba(255,194,75,.06));
+  box-shadow:inset 0 0 0 1px rgba(255,194,75,.35)}
+.rulecard .rbody{min-width:0;flex:1}
+.rulecard h3{font-family:var(--display);font-size:clamp(15px,3.6vw,17px);font-weight:700;margin:2px 0 6px;
+  letter-spacing:-.02em}
+.rulecard p{margin:0;font-size:clamp(13px,3.2vw,14px);line-height:1.55;color:var(--dim)}
+.rulecard .fine{margin-top:10px;font-size:clamp(12px,3vw,12.5px);color:var(--dim2)}
+
+/* доли банка */
+.shares{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.share{border-radius:13px;padding:9px 6px;text-align:center;background:rgba(255,255,255,.05)}
+.share b{display:block;font-family:var(--display);font-size:clamp(14px,3.6vw,17px);line-height:1.1}
+.share span{font-size:clamp(9px,2.4vw,10px);color:var(--dim2);display:block;margin-top:3px}
+.share.s1{background:linear-gradient(150deg,rgba(255,194,75,.26),rgba(255,194,75,.08))}
+.share.s1 b{color:var(--gold)}
+.share.s2{background:rgba(203,213,225,.14)} .share.s2 b{color:#cbd5e1}
+.share.s3{background:rgba(217,152,96,.16)}  .share.s3 b{color:#d99860}
+.share.s4 b{color:var(--dim)}
+
+/* пример расчёта */
+.example{margin-top:12px;display:flex;flex-direction:column;gap:6px}
+.ex{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:12px;
+  background:rgba(255,255,255,.045);font-size:clamp(12.5px,3.1vw,13.5px);color:var(--dim)}
+.ex b{margin-left:auto;font-family:var(--display);color:var(--txt);font-size:clamp(14px,3.4vw,15px)}
+.ex.dim b{color:var(--dim)}
+.ex .pos{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;flex:0 0 auto;
+  font-size:11px;font-weight:800;color:#231703}
+.ex .pos.g{background:linear-gradient(140deg,var(--gold),var(--gold2))}
+.ex .pos.s{background:linear-gradient(140deg,#e2e8f0,#94a3b8)}
+.ex .pos.b{background:linear-gradient(140deg,#e0a96d,#b07c43)}
+.ex .pos.h{background:rgba(255,255,255,.12);color:var(--dim)}
+
+.lawbox{margin-top:clamp(16px,3vw,22px)}
+.lawbox p{margin:8px 0 0}
+
+/* ссылки на документы */
+.doclinks{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:8px}
+.doclink{display:flex;flex-direction:column;gap:2px;padding:13px 16px;border-radius:15px;
+  text-decoration:none;color:var(--txt);background:var(--card);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06);transition:.16s}
+.doclink:hover{box-shadow:inset 0 0 0 1px rgba(108,92,231,.55);transform:translateY(-1px)}
+.doclink span{font-weight:700;font-size:.88rem}
+.doclink small{color:var(--dim2);font-size:.72rem}
+
 </style>
 </head>
 <body>
@@ -2062,28 +2116,71 @@ function sendTicket(roundId){
 /* --- правила --- */
 function renderRules(){
   stopLoop();
-  const block = (n, t, b) => `<div class="panel" style="margin-bottom:1px"><div class="row" style="gap:16px">
-    <div class="rnum">${n}</div>
-    <div><b>${t}</b><div class="tiny muted" style="margin-top:6px">${b}</div></div></div></div>`;
+  /* Каждое правило — отдельная карточка с номером-медалью; между ними воздух,
+     чтобы список читался как набор шагов, а не как сплошная простыня. */
+  const rule = (n, title, body, extra) => `
+    <article class="rulecard">
+      <div class="rnum">${n}</div>
+      <div class="rbody">
+        <h3>${title}</h3>
+        <p>${body}</p>
+        ${extra || ''}
+      </div>
+    </article>`;
+  const D = Core.DOCS;
   $('#app').innerHTML = `
    <div class="screen"><div class="head">
     <div class="h1">Правила</div>
-    <div class="sub">Игра из рукописной задумки: угадайте число ближе всех и заберите банк.</div>
+    <div class="sub">Угадайте число ближе всех — заберите банк. Полторы минуты на чтение.</div>
     </div><div class="scroll">
-    ${block('I','Стол и ставка','Столы на 5 и 10 человек, ставки 10, 50, 100, 500 и 1000 монет. Ставка одинаковая для всех, банк — сумма ставок участников раунда.')}
-    ${block('II','Число','Каждый выбирает число от 1 до 50 и нажимает «готов». На это тридцать секунд. Кто не успел — в раунде не участвует и ничего не теряет. Одно число занимает только один игрок.')}
-    ${block('III','Розыгрыш','Стол выдаёт число от 1 до 50 криптостойким генератором браузера. Побеждает тот, чьё число ближе к выпавшему. При равной разнице выше тот, кто раньше нажал «готов».')}
-    ${block('IV','Три победителя','Первое место — 70% банка, второе — 20%, третье — 5%. Ещё 5% — комиссия стола. Если играли меньше трёх, невостребованные доли уходят первому месту; меньше двух — раунд отменяется и ставки возвращаются.')}
-    ${block('V','Пример','Десять игроков по 100 монет — банк 1000. Первый получает 700, второй 200, третий 50, столу 50.')}
-    ${block('VI','Монеты','Монеты покупаются за рубли и тратятся только в игре: обратно в деньги они не превращаются и не выводятся. Ошибочный платёж возвращается заявкой на возврат в течение ' + CC().settings.refundDays + ' дней.')}
-    ${block('VII','Копилка добра','Десять процентов прибыли заведения уходят в детский дом. Накоплено ' + money(CC().charity) + ' ₽.')}
-    <div class="panel acc" style="margin-top:18px">
+    <div class="rules">
+      ${rule('I', 'Стол и ставка',
+        'Столы на 5 и 10 человек со ставкой 10, 50, 100, 500 или 1000 монет. Ставка одинакова для всех, банк — сумма ставок участников раунда.')}
+      ${rule('II', 'Ваше число',
+        'Выберите число от 1 до 50 и нажмите «готов» — на это тридцать секунд. Одно число занимает только один игрок. Кто не успел, в раунде не участвует и ничего не теряет.')}
+      ${rule('III', 'Розыгрыш',
+        'Стол выдаёт число криптостойким генератором браузера. Побеждает тот, чьё число ближе к выпавшему; при равной разнице выше тот, кто раньше нажал «готов».')}
+      ${rule('IV', 'Три победителя',
+        'Банк делится между тремя ближайшими, ещё 5% — комиссия стола.',
+        `<div class="shares">
+           <div class="share s1"><b>70%</b><span>первое место</span></div>
+           <div class="share s2"><b>20%</b><span>второе</span></div>
+           <div class="share s3"><b>5%</b><span>третье</span></div>
+           <div class="share s4"><b>5%</b><span>столу</span></div>
+         </div>
+         <p class="fine">Играли меньше трёх — невостребованные доли уходят первому месту.
+           Меньше двух — раунд отменяется, ставки возвращаются.</p>`)}
+      ${rule('V', 'Как это считается',
+        'Десять игроков по 100 монет собирают банк 1000.',
+        `<div class="example">
+           <div class="ex"><span class="pos g">1</span><span>получает</span><b>700</b></div>
+           <div class="ex"><span class="pos s">2</span><span>получает</span><b>200</b></div>
+           <div class="ex"><span class="pos b">3</span><span>получает</span><b>50</b></div>
+           <div class="ex dim"><span class="pos h">%</span><span>столу</span><b>50</b></div>
+         </div>`)}
+      ${rule('VI', 'Шансы',
+        'За столом на десять человек шанс занять каждое призовое место — 10%, попасть в призы — 30%. Ожидаемый возврат 95%: пять процентов банка забирает стол.',
+        '<p class="fine">Игра рассчитана на развлечение, а не на заработок: на длинной дистанции баланс тает.</p>')}
+      ${rule('VII', 'Монеты',
+        'Монеты покупаются за рубли и тратятся только в игре: обратно в деньги они не превращаются и не выводятся. Ошибочный платёж возвращается заявкой в течение ' + CC().settings.refundDays + ' дней.')}
+      ${rule('VIII', 'Копилка добра',
+        'Десять процентов прибыли заведения уходят в детский дом. Накоплено ' + money(CC().charity) + ' ₽.')}
+    </div>
+
+    <div class="panel acc lawbox">
       <div class="eyebrow">важно</div>
-      <div class="tiny muted" style="margin-top:8px">Это игра на виртуальные монеты, а не ставки на деньги: выигрыш нельзя
-        обменять на рубли или вывести. Приём ставок с денежными выплатами в России требует лицензии
-        и разрешённой игорной зоны.</div>
-      <div class="acts" style="margin-top:14px"><a class="btn ghost sm" href="Счастливчик-админка.html">Кабинет модератора</a></div>
-    </div></div></div>`;
+      <p class="tiny muted">Это игра на виртуальные монеты, а не ставки на деньги: выигрыш нельзя обменять
+        на рубли или вывести. Играть можно с 18 лет.</p>
+    </div>
+
+    <div class="eyebrow" style="margin:24px 0 10px">документы</div>
+    <div class="doclinks">
+      ${[['terms', D.terms], ['privacy', D.privacy], ['refund', D.refund], ['rules', D.rules]]
+        .map(([k, d]) => `<a class="doclink" href="${d.file}">
+          <span>${d.title}</span><small>ред. ${d.v} от ${d.date}</small></a>`).join('')}
+    </div>
+    <div class="acts" style="margin-top:16px"><a class="btn ghost sm" href="Счастливчик-админка.html">Кабинет модератора</a></div>
+    </div></div>`;
 }
 
 /* --- запуск --- */
