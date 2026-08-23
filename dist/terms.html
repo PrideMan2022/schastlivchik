@@ -55,6 +55,16 @@ footer{border-top:1px solid rgba(255,255,255,.07);margin-top:40px;padding-top:20
   color:var(--dim2);font-size:.82rem}
 footer a{margin-right:16px;display:inline-block;margin-bottom:6px}
 
+/* Подсказка, что широкую таблицу можно листать вбок: тень у края,
+   которая исчезает, когда прокрутка доходит до конца. */
+table{
+  background:
+    linear-gradient(90deg, var(--bg) 30%, rgba(10,12,22,0)) left / 26px 100% no-repeat local,
+    linear-gradient(90deg, rgba(10,12,22,0), var(--bg) 70%) right / 26px 100% no-repeat local,
+    radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.55), transparent) left / 13px 100% no-repeat scroll,
+    radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.55), transparent) right / 13px 100% no-repeat scroll;
+}
+
 </style>
 </head>
 <body>
