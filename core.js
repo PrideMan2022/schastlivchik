@@ -49,7 +49,7 @@ const USER_DEF = {
   sound: true, seen: false, createdAt: 0,
   /* удержание: ежедневные награды, уровень, задания дня */
   daily: { streak: 0, lastDay: '', claimedToday: false },
-  xp: 0, level: 1, quests: { day: '', list: [] }
+  xp: 0, level: 1, quests: { day: '', list: [] }, starterBought: false
 };
 const SETTINGS_VERSION = 5;   // поднимаем, когда меняем значения по умолчанию
 const CORE_DEF = {
@@ -106,13 +106,41 @@ function log(actor, action, detail, ref){
    Монеты покупаются за реальные деньги, но НЕ обмениваются обратно:
    это игровая валюта, а не ставка на деньги. Возврат возможен только
    деньгами через заявку на возврат покупки.                        */
+/* Ценовая лестница построена по трём правилам рынка казуальных игр:
+   вход ниже 100 ₽, цена за 1000 монет падает с ростом пакета (89 → 50 ₽),
+   дорогой пакет служит якорем, на фоне которого средние выглядят выгодно.
+   Держим цены ниже привычных для жанра ценовых точек 99/490/990/2490/4900. */
 const PACKS = [
-  { id: 'p1', coins: 1000,  price: 99,   bonus: 0,   label: 'Проба'    },
-  { id: 'p2', coins: 5500,  price: 490,  bonus: 10,  label: 'Ходовой'  },
-  { id: 'p3', coins: 12000, price: 990,  bonus: 20,  label: 'Выгодный' },
-  { id: 'p4', coins: 32500, price: 2490, bonus: 30,  label: 'Крупный'  },
-  { id: 'p5', coins: 70000, price: 4900, bonus: 42,  label: 'Максимум' }
+  { id: 'p1', coins: 1000,  price: 89,   bonus: 0,   label: 'Проба'    },
+  { id: 'p2', coins: 5500,  price: 399,  bonus: 10,  label: 'Ходовой'  },
+  { id: 'p3', coins: 12000, price: 749,  bonus: 20,  label: 'Выгодный' },
+  { id: 'p4', coins: 32500, price: 1790, bonus: 30,  label: 'Крупный'  },
+  { id: 'p5', coins: 70000, price: 3490, bonus: 42,  label: 'Максимум' }
 ];
+/* Набор новичка: разовое предложение первых трёх суток, монет вдвое больше
+   обычного за те же деньги. Никакой случайности — состав фиксирован и виден
+   до оплаты, поэтому это обычная покупка, а не лутбокс. */
+const STARTER = { id: 'starter', coins: 2500, price: 99, label: 'Набор новичка', hours: 72 };
+function starterAvailable(){
+  if (U.starterBought) return false;
+  return (Date.now() - U.createdAt) < STARTER.hours * 3600000;
+}
+function starterLeft(){
+  return Math.max(0, U.createdAt + STARTER.hours * 3600000 - Date.now());
+}
+/* Выгода дня: один пакет со скидкой 20%. Выбирается по дате, а не случайно —
+   все игроки видят одно и то же предложение, и его нельзя «перекрутить». */
+function dealToday(){
+  const d = new Date(), key = d.getFullYear() * 372 + d.getMonth() * 31 + d.getDate();
+  const pack = PACKS[key % (PACKS.length - 1) + 1];      // «Пробу» не скидываем
+  return { packId: pack.id, price: Math.round(pack.price * 0.8 / 10) * 10, off: 20 };
+}
+function priceOf(packId){
+  const pack = PACKS.find(p => p.id === packId);
+  if (!pack) return 0;
+  const deal = dealToday();
+  return deal.packId === packId ? deal.price : pack.price;
+}
 const METHODS = [
   { id: 'card', n: 'Банковская карта' }, { id: 'sbp', n: 'СБП' },
   { id: 'yoo',  n: 'ЮKassa кошелёк'  }, { id: 'sber', n: 'SberPay' }
@@ -122,12 +150,14 @@ const METHODS = [
    либо created → failed. В бою статус меняет вебхук платёжной системы,
    здесь — эмуляция подтверждения.                                        */
 function createOrder(packId, method){
-  const pack = PACKS.find(p => p.id === packId);
+  const pack = packId === STARTER.id ? STARTER : PACKS.find(p => p.id === packId);
   if (!pack) return { ok: false, err: 'Пакет не найден' };
+  if (packId === STARTER.id && !starterAvailable()) return { ok: false, err: 'Предложение больше недоступно' };
   if (U.blocked) return { ok: false, err: 'Аккаунт заблокирован: ' + (U.blockReason || 'обратитесь в поддержку') };
+  const price = packId === STARTER.id ? STARTER.price : priceOf(packId);
   const o = {
     id: uid('ord'), userId: U.id, nick: U.nick, packId: pack.id, label: pack.label,
-    coins: pack.coins, price: pack.price, method: method || 'card',
+    coins: pack.coins, price: price, method: method || 'card',
     status: 'created', createdAt: Date.now(), paidAt: 0, refundedAt: 0,
     receipt: 'ЧК-' + String(rnd(100000, 999999))
   };
@@ -142,6 +172,7 @@ function confirmOrder(orderId, ok){
   if (!ok){ o.status = 'failed'; saveCore(); log('система','оплата отклонена','', o.id); return { ok: false, err: 'Платёж отклонён банком' }; }
   o.status = 'paid'; o.paidAt = Date.now();
   U.coins += o.coins; C.revenue += o.price;
+  if (o.packId === STARTER.id) U.starterBought = true;
   saveUser(); saveCore();
   log('система', 'оплата принята', o.coins + ' монет зачислено, ' + o.price + ' ₽', o.id);
   return { ok: true, order: o };
@@ -494,6 +525,7 @@ function registerFee(fee){ C.houseFee += fee; C.charity += fee * 0.10; saveCore(
 
 root.Core = {
   PACKS, METHODS, TICKET_TOPICS, ICONS, ICON_BG, DOCS,
+  STARTER, starterAvailable, starterLeft, dealToday, priceOf,
   setProfile, photoToAvatar, validEmail,
   acceptDocs, consentsOk, exportData, deleteAccount,
   DAILY, dailyState, claimDaily, addXp, levelNeed, questsToday, questProgress, claimQuest,

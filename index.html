@@ -12,7 +12,10 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<link rel="stylesheet" href="styles.css?v=34">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css?v=36">
 </head>
 <body>
 <header><div class="wrap hd">
@@ -41,7 +44,7 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=34"></script>
+<script src="core.js?v=36"></script>
 <script>
 'use strict';
 /* Держим высоту приложения равной реально видимой области.
@@ -580,16 +583,20 @@ function shopBuy(){
     <div class="eyebrow" style="margin-bottom:8px">способ оплаты</div>
     <div class="methods">${Core.METHODS.map(m =>
       `<button class="${shopMethod===m.id?'on':''}" onclick="shopMethod='${m.id}';renderShop()">${m.n}</button>`).join('')}</div>
+    ${starterCard()}
     <div class="eyebrow" style="margin:22px 0 10px">пакеты</div>
     <div class="packs">
-      ${Core.PACKS.map((p, i) => `<button class="pack ${p.bonus>=30?'best':''}" onclick="buy('${p.id}')">
-        ${p.bonus ? `<span class="bonus">+${p.bonus}%</span>` : ''}
+      ${Core.PACKS.map((p, i) => {
+        const deal = Core.dealToday(), hot = deal.packId === p.id, price = Core.priceOf(p.id);
+        return `<button class="pack ${p.bonus>=30?'best':''} ${hot?'deal':''}" onclick="buy('${p.id}')">
+        ${hot ? `<span class="dealtag">−${deal.off}% сегодня</span>`
+              : (p.bonus ? `<span class="bonus">+${p.bonus}%</span>` : '')}
         <div class="stack">${['🪙','💰','💎','👑','🏆'][i]}</div>
         <div class="coins num">${money(p.coins)}</div>
         <div class="lbl">${p.label}</div>
-        <div class="price num">${money(p.price)} ₽</div>
-        <div class="rate">${(p.price/p.coins*1000).toFixed(0)} ₽ за 1000 монет</div>
-      </button>`).join('')}
+        <div class="price num">${money(price)} ₽${hot ? ` <s>${money(p.price)}</s>` : ''}</div>
+        <div class="rate">${(price/p.coins*1000).toFixed(0)} ₽ за 1000 монет</div>
+      </button>`; }).join('')}
     </div>
     <div class="panel flat" style="margin-top:18px">
       <div class="eyebrow">как это работает по-настоящему</div>
@@ -669,12 +676,35 @@ function shopHistory(){
           {new:'на проверке', paid:'выплачено', rejected:'отклонено', approved:'одобрено'}[p.status]}</span>
       </div>`).join('')}</div>` : '<div class="empty">выплат ещё не было</div>'}`;
 }
+/* Набор новичка: показываем только первые трое суток и только один раз. */
+function starterCard(){
+  if (!Core.starterAvailable()) return '';
+  const S = Core.STARTER, ms = Core.starterLeft();
+  const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000);
+  return `
+    <div class="eyebrow" style="margin:26px 0 10px">специальное предложение</div>
+    <button class="starter" onclick="buy('${S.id}')">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="row between center" style="position:relative;gap:12px">
+        <div style="min-width:0">
+          <div class="eyebrow" style="color:var(--gold)">только для новых игроков</div>
+          <div class="display" style="font-size:clamp(19px,5vw,26px);margin-top:4px">${money(S.coins)} монет</div>
+          <div class="tiny muted">вдвое больше «Пробы» за те же деньги · осталось ${h} ч ${m} мин</div>
+        </div>
+        <div style="text-align:right;flex:0 0 auto">
+          <div class="display gold" style="font-size:clamp(20px,5.4vw,28px)">${S.price} ₽</div>
+          <div class="tiny muted">${(S.price / S.coins * 1000).toFixed(0)} ₽ за 1000</div>
+        </div>
+      </div>
+    </button>`;
+}
 function orderLabel(s){
   return { created:'ожидает оплаты', paid:'оплачен', failed:'не прошёл',
            refund_requested:'возврат на проверке', refunded:'возвращён' }[s] || s;
 }
 function buy(packId){
-  const p = Core.PACKS.find(x => x.id === packId); if (!p) return;
+  const p = packId === Core.STARTER.id ? Core.STARTER : Core.PACKS.find(x => x.id === packId);
+  if (!p) return;
   const r = Core.createOrder(packId, shopMethod);
   if (!r.ok){ toast(r.err, 'bad'); return; }
   const o = r.order, m = (Core.METHODS.find(x => x.id === shopMethod) || {}).n;

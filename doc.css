@@ -3,7 +3,8 @@
   --bg:#0a0c16; --card:#151a2e; --card2:#1c2340;
   --indigo:#6c5ce7; --indigo2:#8b7bff; --gold:#ffc24b; --emerald:#34d399; --red:#ff6b6b;
   --txt:#f2f4ff; --dim:#a2a8c3; --dim2:#6b7396;
-  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --sans:"Nunito",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --display:"Unbounded","Nunito",sans-serif;
 }
 *{box-sizing:border-box}
 html{font-size:clamp(15px, 14px + .35vw, 18px);-webkit-text-size-adjust:100%}
@@ -55,3 +56,9 @@ table{
     radial-gradient(farthest-side at 0 50%, rgba(0,0,0,.55), transparent) left / 13px 100% no-repeat scroll,
     radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.55), transparent) right / 13px 100% no-repeat scroll;
 }
+
+
+/* заголовки документов — фирменным дисплейным шрифтом */
+h1,h2,.hd b{font-family:var(--display);letter-spacing:-.02em}
+h1{font-weight:800}
+h2{font-weight:700}

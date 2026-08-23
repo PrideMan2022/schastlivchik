@@ -13,11 +13,14 @@
   --indigo:#6c5ce7; --indigo2:#8b7bff; --indigo3:#a89bff;
   --cyan:#22d3ee; --magenta:#ff5fa2; --emerald:#34d399; --gold:#ffc24b; --gold2:#ff9f43;
   --red:#ff6b6b;
-  --txt:#f2f4ff; --dim:#a2a8c3; --dim2:#6b7396;
+  --txt:#f2f4ff; --dim:#a2a8c3; --dim2:#7d86a8;
   --glow-i:0 8px 30px rgba(108,92,231,.38);
   --glow-g:0 8px 26px rgba(255,194,75,.3);
   --glow-e:0 8px 26px rgba(52,211,153,.28);
-  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  /* Nunito — мягкий текстовый гротеск, Unbounded — дисплейный для заголовков
+     и чисел. Оба с кириллицей: Fredoka и Varela Round её не поддерживают. */
+  --sans:"Nunito",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --display:"Unbounded","Nunito",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
   --serif:"Iowan Old Style","Palatino Linotype",Georgia,serif;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -49,14 +52,14 @@ input,textarea,select{font:inherit;color:inherit}
 main.wrap{flex:1;min-height:0;display:flex;flex-direction:column;padding-bottom:10px;overflow:hidden}
 
 /* ---------- типографика ---------- */
-.h1{font-size:clamp(22px,4.4vw,32px);font-weight:800;letter-spacing:-.02em;margin:clamp(16px,3vw,28px) 0 6px}
+.h1{font-family:var(--display);font-size:clamp(21px,4.2vw,30px);font-weight:800;letter-spacing:-.02em;margin:clamp(16px,3vw,28px) 0 6px}
 .h2{font-size:clamp(17px,2.6vw,21px);font-weight:700;letter-spacing:-.01em;margin:clamp(20px,3vw,30px) 0 12px}
 .sub{color:var(--dim);font-size:13.5px;margin-bottom:18px;max-width:62ch}
 .eyebrow{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--dim2)}
 .num{font-variant-numeric:tabular-nums lining-nums}
 .muted{color:var(--dim)} .tiny{font-size:12px}
 .pos{color:var(--emerald)} .neg{color:var(--red)} .gold{color:var(--gold)}
-.display{font-family:var(--serif)}
+.display{font-family:var(--display);letter-spacing:-.02em}
 .rule{height:1px;background:var(--line2);margin:18px 0}
 .row{display:flex;gap:12px} .grow{flex:1} .between{justify-content:space-between} .center{align-items:center}
 
@@ -117,7 +120,7 @@ header{flex:0 0 auto;z-index:50;background:rgba(10,12,22,.78);backdrop-filter:bl
 .brand b{font-size:clamp(14px,4vw,17px);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:520px){ .brand span{display:none} }
 @media (max-width:340px){ .brand{display:none} }
-.brand b{font-size:17px;font-weight:800;display:block;line-height:1.15;letter-spacing:-.01em}
+.brand b{font-family:var(--display);font-size:16px;font-weight:800;display:block;line-height:1.15;letter-spacing:-.02em}
 .brand span{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim2);font-weight:700}
 .purse{margin-left:auto;order:2;flex:0 0 auto;display:flex;align-items:center;gap:8px;
   padding:5px 5px 5px clamp(10px,3vw,14px);border-radius:999px;
@@ -356,7 +359,7 @@ nav{flex:0 0 auto;z-index:60;background:rgba(10,12,22,.9);backdrop-filter:blur(1
 .pack .rate{font-size:clamp(9.5px,2.4vw,11.5px);color:var(--dim2);margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pack .bonus{position:absolute;top:10px;right:10px;border-radius:999px;padding:4px 9px;
-  background:linear-gradient(135deg,var(--magenta),#ff3d81);color:#fff;font-size:11.5px;font-weight:800;
+  background:linear-gradient(135deg,var(--magenta),#ff3d81);color:#2a0512;font-size:11.5px;font-weight:800;
   box-shadow:0 6px 18px rgba(255,95,162,.4)}
 
 /* ============================================================
@@ -420,7 +423,7 @@ table.tb td .q.gold{color:var(--gold)}
 
 /* римская нумерация в правилах — фиксированная колонка, чтобы текст не прыгал */
 .rnum{flex:0 0 auto;min-width:44px;height:44px;border-radius:14px;display:grid;place-items:center;
-  font-family:var(--serif);font-size:17px;color:var(--gold);background:rgba(255,194,75,.14)}
+  font-family:var(--display);font-size:16px;color:var(--gold);background:rgba(255,194,75,.14)}
 
 
 /* ============================================================
@@ -529,3 +532,22 @@ table.tb td .q.gold{color:var(--gold)}
 .wd.now{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#291a00;
   box-shadow:var(--glow-g);transform:scale(1.06)}
 .wd.now .d{color:rgba(41,26,0,.65)}
+
+/* набор новичка и выгода дня */
+.starter{display:block;width:100%;text-align:left;border-radius:20px;padding:clamp(16px,3.4vw,22px);
+  position:relative;overflow:hidden;margin:0 0 4px;
+  background:linear-gradient(140deg,rgba(255,194,75,.22),rgba(255,95,162,.14) 55%,var(--card));
+  box-shadow:0 0 0 1px rgba(255,194,75,.35), var(--glow-g)}
+.starter .glow{position:absolute;inset:-40% -20% auto auto;width:60%;height:180%;
+  background:radial-gradient(circle,rgba(255,194,75,.3),transparent 70%);pointer-events:none}
+.starter:hover{transform:translateY(-2px)}
+.pack.deal{box-shadow:0 0 0 1px rgba(255,95,162,.5), 0 0 28px rgba(255,95,162,.2)}
+.dealtag{position:absolute;top:10px;right:10px;font-size:.62rem;font-weight:800;letter-spacing:.06em;
+  text-transform:uppercase;padding:4px 9px;border-radius:999px;background:var(--magenta);color:#2a0512}
+.price s{color:var(--dim2);font-weight:600;font-size:.8em;margin-left:4px}
+
+
+/* Крупные игровые числа набираем дисплейным шрифтом: так таймер, банк
+   и цены читаются как элемент фирменного стиля, а не как обычный текст. */
+.dial b, .drawn b, .bank b, .coins, .price, .tbl .stake, .wd b, .balance .v{
+  font-family:var(--display);letter-spacing:-.03em}
