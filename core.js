@@ -49,7 +49,8 @@ const USER_DEF = {
   sound: true, seen: false, createdAt: 0,
   /* удержание: ежедневные награды, уровень, задания дня */
   daily: { streak: 0, lastDay: '', claimedToday: false },
-  xp: 0, level: 1, quests: { day: '', list: [] }, starterBought: false
+  xp: 0, level: 1, quests: { day: '', list: [] }, starterBought: false,
+  season: null, frames: [], frame: ''
 };
 const SETTINGS_VERSION = 5;   // поднимаем, когда меняем значения по умолчанию
 const CORE_DEF = {
@@ -150,11 +151,14 @@ const METHODS = [
    либо created → failed. В бою статус меняет вебхук платёжной системы,
    здесь — эмуляция подтверждения.                                        */
 function createOrder(packId, method){
-  const pack = packId === STARTER.id ? STARTER : PACKS.find(p => p.id === packId);
+  const pack = packId === STARTER.id ? STARTER
+             : packId === PASS.id ? PASS
+             : PACKS.find(p => p.id === packId);
   if (!pack) return { ok: false, err: 'Пакет не найден' };
   if (packId === STARTER.id && !starterAvailable()) return { ok: false, err: 'Предложение больше недоступно' };
   if (U.blocked) return { ok: false, err: 'Аккаунт заблокирован: ' + (U.blockReason || 'обратитесь в поддержку') };
-  const price = packId === STARTER.id ? STARTER.price : priceOf(packId);
+  const price = packId === STARTER.id ? STARTER.price
+              : packId === PASS.id ? PASS.price : priceOf(packId);
   const o = {
     id: uid('ord'), userId: U.id, nick: U.nick, packId: pack.id, label: pack.label,
     coins: pack.coins, price: price, method: method || 'card',
@@ -173,6 +177,7 @@ function confirmOrder(orderId, ok){
   o.status = 'paid'; o.paidAt = Date.now();
   U.coins += o.coins; C.revenue += o.price;
   if (o.packId === STARTER.id) U.starterBought = true;
+  if (o.packId === PASS.id){ season().premium = true; saveUser(); }
   saveUser(); saveCore();
   log('система', 'оплата принята', o.coins + ' монет зачислено, ' + o.price + ' ₽', o.id);
   return { ok: true, order: o };
@@ -504,15 +509,140 @@ function claimQuest(id){
   return { ok: true, reward: q.reward };
 }
 
+/* ============================================================
+   СЕЗОН, ЛИГИ И ПРОПУСК
+   Очки сезона капают за каждый раунд. Игрок сидит в лиге из двадцати
+   человек; раз в неделю пятеро лучших поднимаются, пятеро нижних падают.
+   Пропуск сезона — тридцать уровней наград, бесплатная дорожка у всех,
+   платная открывается разовой покупкой. Никакой случайности за деньги:
+   что именно дают уровни, видно заранее.
+   ============================================================ */
+const LEAGUES = [
+  { id: 1, name: 'Дерево',  color: '#a1795a', reward: 300  },
+  { id: 2, name: 'Бронза',  color: '#d99860', reward: 700  },
+  { id: 3, name: 'Серебро', color: '#cbd5e1', reward: 1500 },
+  { id: 4, name: 'Золото',  color: '#ffc24b', reward: 3000 },
+  { id: 5, name: 'Платина', color: '#67e8f9', reward: 6000 },
+  { id: 6, name: 'Алмаз',   color: '#a78bfa', reward: 12000 }
+];
+const PASS_LEVELS = 30;
+const PASS_PRICE = 349;
+/* Порог уровня растёт линейно: первый — 250 очков, тридцатый — 1700. */
+function passNeed(level){ return 250 + level * 50; }
+/* Награды дорожек. Крупные ступени — на 10, 20 и 30 уровнях. */
+function passReward(level, premium){
+  const big = level % 10 === 0;
+  if (!premium) return { coins: big ? 800 : 120 + level * 10 };
+  if (level === 30) return { coins: 6000, frame: 'legend' };
+  if (level === 20) return { coins: 3000, frame: 'gold' };
+  if (level === 10) return { coins: 1500, frame: 'neon' };
+  return { coins: 300 + level * 40 };
+}
+/* Номер недели по ISO — им же метится сезонная таблица. */
+function weekKey(t){
+  const d = new Date(t || Date.now());
+  const x = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  x.setUTCDate(x.getUTCDate() + 4 - (x.getUTCDay() || 7));
+  const y0 = new Date(Date.UTC(x.getUTCFullYear(), 0, 1));
+  return x.getUTCFullYear() + '-' + Math.ceil(((x - y0) / 86400000 + 1) / 7);
+}
+function weekEnds(){
+  const d = new Date(), day = (d.getDay() || 7);
+  const end = new Date(d); end.setDate(d.getDate() + (8 - day));
+  end.setHours(0, 0, 0, 0); return end.getTime();
+}
+const BOT_NICKS = ['Тимур','Марго','Глеб','Ада','Феликс','Дина','Лев','Стефа','Осип','Агата',
+  'Ян','Вера','Борис','Соня','Аркадий','Игнат','Тихон','Ева','Демид','Рита','Клим','Нина'];
+function makeBoard(tier){
+  const pace = 0.6 + tier * 0.25;            // чем выше лига, тем злее соперники
+  const board = [];
+  for (let i = 0; i < 19; i++){
+    board.push({
+      nick: BOT_NICKS[i % BOT_NICKS.length] + (i >= BOT_NICKS.length ? ' ' + (i + 1) : ''),
+      av: ICONS[rnd(0, ICONS.length - 1)], bg: ICON_BG[rnd(0, ICON_BG.length - 1)],
+      points: rnd(0, 60), pace: pace * (0.5 + rand()), bot: true
+    });
+  }
+  return board;
+}
+function season(){
+  const wk = weekKey();
+  if (!U.season){
+    U.season = { week: wk, tier: 1, points: 0, weekPoints: 0, passLevel: 0,
+                 passXp: 0, claimedFree: [], claimedPrem: [], premium: false,
+                 board: makeBoard(1), lastTick: Date.now(), result: null };
+    saveUser();
+  }
+  if (U.season.week !== wk) closeWeek();
+  tickBoard();
+  return U.season;
+}
+/* Соперники набирают очки в фоне — иначе таблица мертва между заходами. */
+function tickBoard(){
+  const s = U.season, now = Date.now();
+  const mins = Math.min(2880, (now - (s.lastTick || now)) / 60000);
+  if (mins < 1) return;
+  s.board.forEach(b => { b.points += Math.round(b.pace * mins * (0.6 + rand() * 0.8)); });
+  s.lastTick = now; saveUser();
+}
+/* Подведение итогов недели: награда по месту, повышение или вылет. */
+function closeWeek(){
+  const s = U.season;
+  const rows = s.board.concat([{ nick: U.nick, points: s.weekPoints, me: true }])
+                      .sort((a, b) => b.points - a.points);
+  const place = rows.findIndex(r => r.me) + 1;
+  const L = LEAGUES[s.tier - 1];
+  let coins = 0, move = 0;
+  if (place <= 5){ coins = Math.round(L.reward * (place === 1 ? 1 : place === 2 ? .7 : place === 3 ? .5 : .3));
+                   move = s.tier < LEAGUES.length ? 1 : 0; }
+  else if (place >= 16){ move = s.tier > 1 ? -1 : 0; }
+  else coins = Math.round(L.reward * 0.12);
+  U.coins += coins;
+  s.result = { league: L.name, place: place, coins: coins, move: move, seen: false };
+  s.tier = Math.min(LEAGUES.length, Math.max(1, s.tier + move));
+  s.week = weekKey(); s.weekPoints = 0; s.board = makeBoard(s.tier); s.lastTick = Date.now();
+  log('система', 'итоги недели', L.name + ', место ' + place + ', +' + coins + ' монет', U.id);
+  saveUser();
+}
+/* Очки за раунд: участие, место и множитель ставки. */
+function addSeasonPoints(place, mult){
+  const s = season();
+  const base = 10 + (place === 1 ? 100 : place === 2 ? 50 : place === 3 ? 25 : 0);
+  const pts = Math.round(base * (1 + (mult - 1) * 0.35));
+  s.points += pts; s.weekPoints += pts; s.passXp += pts;
+  let up = 0;
+  while (s.passLevel < PASS_LEVELS && s.passXp >= passNeed(s.passLevel + 1)){
+    s.passXp -= passNeed(s.passLevel + 1); s.passLevel++; up++;
+  }
+  saveUser();
+  return { points: pts, levelsUp: up, level: s.passLevel };
+}
+function claimPass(level, premium){
+  const s = season();
+  if (level > s.passLevel) return { ok: false, err: 'Уровень ещё не пройден' };
+  if (premium && !s.premium) return { ok: false, err: 'Нужен премиум-пропуск' };
+  const list = premium ? s.claimedPrem : s.claimedFree;
+  if (list.indexOf(level) >= 0) return { ok: false, err: 'Награда уже забрана' };
+  const r = passReward(level, premium);
+  list.push(level); U.coins += r.coins;
+  if (r.frame && U.frames.indexOf(r.frame) < 0){ U.frames.push(r.frame); U.frame = r.frame; }
+  saveUser();
+  log('система', 'награда пропуска', 'уровень ' + level + (premium ? ' (премиум)' : '') + ', +' + r.coins, U.id);
+  return { ok: true, reward: r };
+}
+const PASS = { id: 'pass', label: 'Пропуск сезона', price: PASS_PRICE, coins: 0 };
+
 /* ---------- экономика раунда ---------- */
 /* Возвращает распределение банка. Доли 70/20/5, комиссия 5%,
    копейки округления и невостребованные доли — первому месту.   */
+/* Банк складывается из личных ставок: у каждого своя, потому что игрок
+   выбирает множитель. Доли победителей считаются от общего банка. */
 function payout(players, roll, stake){
   const list = players.slice().sort((a, b) => {
     const da = Math.abs(a.pick - roll), db = Math.abs(b.pick - roll);
     return da !== db ? da - db : a.readyAt - b.readyAt;
   });
-  const pot = list.length * stake;
+  const pot = list.reduce((sum, p) => sum + (p.bet || stake), 0);
   const fee = Math.round(pot * 0.05);
   const shares = [0.70, 0.20, 0.05];
   let paid = 0;
@@ -526,6 +656,8 @@ function registerFee(fee){ C.houseFee += fee; C.charity += fee * 0.10; saveCore(
 root.Core = {
   PACKS, METHODS, TICKET_TOPICS, ICONS, ICON_BG, DOCS,
   STARTER, starterAvailable, starterLeft, dealToday, priceOf,
+  LEAGUES, PASS, PASS_LEVELS, PASS_PRICE, passNeed, passReward,
+  season, addSeasonPoints, claimPass, weekEnds,
   setProfile, photoToAvatar, validEmail,
   acceptDocs, consentsOk, exportData, deleteAccount,
   DAILY, dailyState, claimDaily, addXp, levelNeed, questsToday, questProgress, claimQuest,
