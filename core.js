@@ -632,6 +632,45 @@ function claimPass(level, premium){
 }
 const PASS = { id: 'pass', label: 'Пропуск сезона', price: PASS_PRICE, coins: 0 };
 
+/* ============================================================
+   ЧЕСТНОЕ ЧИСЛО И ПОДСКАЗКИ
+   Число выпадает в начале раунда и сразу фиксируется отпечатком SHA-256.
+   Отпечаток виден игрокам до ставок, соль раскрывается после розыгрыша —
+   любой может проверить, что число не подменяли. Именно поэтому подсказки
+   честны: стол не подгоняет результат под ставки, он раскрывает свойства
+   уже загаданного числа.
+   ============================================================ */
+async function commitNumber(){
+  const value = rnd(1, 50);
+  const salt = uid('s');
+  let hash = '';
+  try {
+    const data = new TextEncoder().encode(value + ':' + salt);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch(e){ hash = 'проверка недоступна в этом браузере'; }
+  return { value: value, salt: salt, hash: hash };
+}
+/* Подсказки — правдивые факты о загаданном числе, от общих к точным. */
+function makeHints(value){
+  const half = value <= 25 ? 'от 1 до 25' : 'от 26 до 50';
+  const parity = value % 2 ? 'нечётное' : 'чётное';
+  const lo = Math.max(1, Math.min(41, value - rnd(3, 9)));
+  const hi = Math.min(50, lo + 9);
+  const band = (value >= lo && value <= hi) ? [lo, hi] : [Math.max(1, value - 5), Math.min(50, value + 4)];
+  return [
+    { at: 9,  text: 'Число ' + half },
+    { at: 18, text: 'Число ' + parity },
+    { at: 25, text: 'Число между ' + band[0] + ' и ' + band[1] }
+  ];
+}
+/* Цены решений внутри раунда — доля от ставки, всегда видна заранее. */
+const ACTIONS = {
+  swap:      { part: 0.25, label: 'Сменить число' },
+  probe:     { part: 0.15, label: 'Проверить число' },
+  insurance: { part: 0.30, label: 'Страховка' }
+};
+
 /* ---------- экономика раунда ---------- */
 /* Возвращает распределение банка. Доли 70/20/5, комиссия 5%,
    копейки округления и невостребованные доли — первому месту.   */
@@ -658,6 +697,7 @@ root.Core = {
   STARTER, starterAvailable, starterLeft, dealToday, priceOf,
   LEAGUES, PASS, PASS_LEVELS, PASS_PRICE, passNeed, passReward,
   season, addSeasonPoints, claimPass, weekEnds,
+  commitNumber, makeHints, ACTIONS,
   setProfile, photoToAvatar, validEmail,
   acceptDocs, consentsOk, exportData, deleteAccount,
   DAILY, dailyState, claimDaily, addXp, levelNeed, questsToday, questProgress, claimQuest,

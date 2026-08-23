@@ -692,6 +692,27 @@ table.tb td .q.gold{color:var(--gold)}
 .filters .pip{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--magenta);
   margin-left:6px;vertical-align:middle}
 
+/* ============================================================
+   ПОДСКАЗКИ И РЕШЕНИЯ ВНУТРИ РАУНДА
+   ============================================================ */
+.hints{padding:clamp(11px,2.6vw,15px);border-radius:18px;margin-bottom:10px;
+  background:linear-gradient(150deg,var(--card2),var(--card))}
+.hintlist{display:flex;flex-wrap:wrap;gap:6px;margin:9px 0 11px}
+.hint{padding:6px 11px;border-radius:999px;font-size:clamp(11px,2.9vw,12.5px);font-weight:600;
+  background:rgba(34,211,238,.14);color:var(--cyan)}
+.hint.empty{background:rgba(255,255,255,.05);color:var(--dim2);font-weight:500}
+.hint.probe{background:rgba(255,194,75,.16);color:var(--gold)}
+.decisions{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.dec{padding:9px 6px;border-radius:13px;text-align:center;background:rgba(255,255,255,.05);
+  transition:.15s;box-shadow:inset 0 0 0 1px rgba(255,255,255,.07)}
+.dec b{display:block;font-size:clamp(11.5px,3vw,13px)}
+.dec span{display:block;font-size:clamp(9px,2.4vw,10.5px);color:var(--dim2);margin-top:2px}
+.dec:not(:disabled):hover{box-shadow:inset 0 0 0 1px var(--indigo2);transform:translateY(-1px)}
+.dec:disabled{opacity:.42;cursor:default}
+.fair{margin-top:10px;font-size:clamp(9.5px,2.5vw,10.5px);color:var(--dim2);word-break:break-all}
+.fair code{color:var(--dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.fair.mini{margin-top:12px;text-align:center}
+
 </style>
 </head>
 <body>
@@ -1357,6 +1378,45 @@ function claimPass(level, premium){
 }
 const PASS = { id: 'pass', label: 'Пропуск сезона', price: PASS_PRICE, coins: 0 };
 
+/* ============================================================
+   ЧЕСТНОЕ ЧИСЛО И ПОДСКАЗКИ
+   Число выпадает в начале раунда и сразу фиксируется отпечатком SHA-256.
+   Отпечаток виден игрокам до ставок, соль раскрывается после розыгрыша —
+   любой может проверить, что число не подменяли. Именно поэтому подсказки
+   честны: стол не подгоняет результат под ставки, он раскрывает свойства
+   уже загаданного числа.
+   ============================================================ */
+async function commitNumber(){
+  const value = rnd(1, 50);
+  const salt = uid('s');
+  let hash = '';
+  try {
+    const data = new TextEncoder().encode(value + ':' + salt);
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  } catch(e){ hash = 'проверка недоступна в этом браузере'; }
+  return { value: value, salt: salt, hash: hash };
+}
+/* Подсказки — правдивые факты о загаданном числе, от общих к точным. */
+function makeHints(value){
+  const half = value <= 25 ? 'от 1 до 25' : 'от 26 до 50';
+  const parity = value % 2 ? 'нечётное' : 'чётное';
+  const lo = Math.max(1, Math.min(41, value - rnd(3, 9)));
+  const hi = Math.min(50, lo + 9);
+  const band = (value >= lo && value <= hi) ? [lo, hi] : [Math.max(1, value - 5), Math.min(50, value + 4)];
+  return [
+    { at: 9,  text: 'Число ' + half },
+    { at: 18, text: 'Число ' + parity },
+    { at: 25, text: 'Число между ' + band[0] + ' и ' + band[1] }
+  ];
+}
+/* Цены решений внутри раунда — доля от ставки, всегда видна заранее. */
+const ACTIONS = {
+  swap:      { part: 0.25, label: 'Сменить число' },
+  probe:     { part: 0.15, label: 'Проверить число' },
+  insurance: { part: 0.30, label: 'Страховка' }
+};
+
 /* ---------- экономика раунда ---------- */
 /* Возвращает распределение банка. Доли 70/20/5, комиссия 5%,
    копейки округления и невостребованные доли — первому месту.   */
@@ -1383,6 +1443,7 @@ root.Core = {
   STARTER, starterAvailable, starterLeft, dealToday, priceOf,
   LEAGUES, PASS, PASS_LEVELS, PASS_PRICE, passNeed, passReward,
   season, addSeasonPoints, claimPass, weekEnds,
+  commitNumber, makeHints, ACTIONS,
   setProfile, photoToAvatar, validEmail,
   acceptDocs, consentsOk, exportData, deleteAccount,
   DAILY, dailyState, claimDaily, addXp, levelNeed, questsToday, questProgress, claimQuest,
@@ -1503,10 +1564,77 @@ function exitTable(){
   stopLoop(); G = null; Core.saveUser(); paintCoins(); closeLayer();
 }
 function leaveTable(){ exitTable(); go('lobby'); }
+/* Число загадывается в начале раунда и фиксируется отпечатком SHA-256:
+   подсказки раскрывают свойства уже готового числа, а не подгоняются под ставки. */
+async function commitRound(){
+  const round = G && G.round;
+  const c = await Core.commitNumber();
+  if (!G || G.round !== round) return;
+  G.roll = c.value; G.salt = c.salt; G.hash = c.hash;
+  G.hints = Core.makeHints(c.value);
+  paintDyn();
+}
+/* Соперники тоже слышат подсказку и часть из них меняет число — иначе
+   игрок один реагирует на новую информацию, и стол кажется мёртвым. */
+function botsRethink(hintIndex){
+  const h = G.hints[hintIndex]; if (!h) return;
+  G.seats.forEach(s => {
+    if (!s.bot || !s.pick || Core.rand() > .45) return;
+    const fit = hintFits(h, s.pick);
+    if (fit) return;
+    const n = freeNumberMatching(h);
+    if (n) s.pick = n;
+  });
+}
+function hintFits(h, n){
+  const m = h.text.match(/между (\d+) и (\d+)/);
+  if (m) return n >= +m[1] && n <= +m[2];
+  if (h.text.indexOf('нечётное') >= 0) return n % 2 === 1;
+  if (h.text.indexOf('чётное') >= 0) return n % 2 === 0;
+  if (h.text.indexOf('от 1 до 25') >= 0) return n <= 25;
+  if (h.text.indexOf('от 26 до 50') >= 0) return n > 25;
+  return true;
+}
+function freeNumberMatching(h){
+  const taken = new Set(G.seats.filter(s => s.pick).map(s => s.pick));
+  const fit = [];
+  for (let n = 1; n <= 50; n++) if (!taken.has(n) && hintFits(h, n)) fit.push(n);
+  return fit.length ? fit[rnd(0, fit.length - 1)] : 0;
+}
+/* Смена числа после ставки: первая бесплатно, дальше четверть ставки. */
+function swapCost(){ return G.swaps === 0 ? 0 : Math.round(G.me.bet * Core.ACTIONS.swap.part); }
+function probeCost(){ return Math.round(G.table.stake * G.mult * Core.ACTIONS.probe.part); }
+function insureCost(){ return Math.round(G.me.bet * Core.ACTIONS.insurance.part); }
+/* «Проверить число» — стол честно отвечает, насколько выбор далёк от загаданного. */
+function probe(){
+  if (!G || G.phase !== 'betting' || !G.me.pick || G.probe) return;
+  const cost = probeCost();
+  if (U().coins < cost){ toast('Не хватает монет', 'bad'); go('shop'); return; }
+  U().coins -= cost; Core.saveUser(); paintCoins();
+  const d = Math.abs(G.me.pick - G.roll);
+  G.probe = d <= 2 ? 'горячо: разница не больше двух'
+          : d <= 6 ? 'тепло: разница от трёх до шести'
+          : d <= 12 ? 'прохладно: разница до двенадцати'
+          : 'холодно: разница больше двенадцати';
+  sfx.pick(); toast(G.probe, d <= 6 ? 'good' : ''); paintDyn();
+}
+/* Страховка: половина ставки возвращается, если раунд проигран. */
+function insure(){
+  if (!G || G.phase !== 'betting' || !G.me.ready || G.insured) return;
+  const cost = insureCost();
+  if (U().coins < cost){ toast('Не хватает монет', 'bad'); go('shop'); return; }
+  U().coins -= cost; G.insured = true; G.insuranceCost = cost;
+  Core.saveUser(); paintCoins(); sfx.pick();
+  toast('Страховка оформлена: при проигрыше вернётся половина ставки', 'good');
+  paintDyn();
+}
 function newRound(first){
   const t = G.table;
   G.round++; G.phase = 'betting'; G.t0 = Date.now(); G.roll = 0;
   G.winners = []; G.cancelled = false; pickerPhase = null;
+  G.hints = []; G.shown = []; G.hash = ''; G.salt = '';
+  G.probe = null; G.insured = false; G.swaps = 0;
+  commitRound();
   const keep = first ? [] : G.seats.filter(s => s.bot && Core.rand() < .65);
   keep.forEach(b => { b.pick=null; b.ready=false; b.readyAt=0; b.place=0; b.won=0; b.speed=rnd(3,26); b.lazy=Core.rand()<.08; });
   const me = { bot:false, nick:'Вы', mono:'В', pick:null, ready:false, readyAt:0, place:0, won:0 };
@@ -1534,6 +1662,16 @@ function tick(){
         s.ready = true; s.readyAt = Date.now(); s.bet = G.table.stake * (s.mult || 1);
       }
     });
+    /* Подсказки выходят по расписанию; каждая — повод пересмотреть выбор. */
+    const passed = el / 1000;
+    (G.hints || []).forEach((h, i) => {
+      if (passed >= h.at && G.shown.indexOf(i) < 0){
+        G.shown.push(i);
+        sfx.pick(); toast('Подсказка: ' + h.text.toLowerCase());
+        botsRethink(i);
+        paintDyn();
+      }
+    });
     if (left !== lastSec){ lastSec = left; if (left <= 5 && left > 0) sfx.tick(); }
     const allReady = G.seats.every(s => s.ready || (s.bot && s.lazy));
     if (left <= 0 || (allReady && el > 2500)) startRoll(); else paintDyn();
@@ -1553,9 +1691,17 @@ function freeNumber(pref){
   return n;
 }
 function pickNum(n, random){
-  if (!G || G.phase !== 'betting' || G.me.ready) return;
+  if (!G || G.phase !== 'betting') return;
   if (random) n = freeNumber(null);
   if (G.seats.some(s => s !== G.me && s.pick === n)) return;
+  if (G.me.ready){                       // ставка уже сделана — это смена решения
+    const cost = swapCost();
+    if (cost && U().coins < cost){ toast('Не хватает монет на смену', 'bad'); return; }
+    if (cost){ U().coins -= cost; Core.saveUser(); paintCoins(); }
+    G.swaps++;
+    toast(cost ? 'Число изменено за ' + money(cost) : 'Число изменено бесплатно',
+          cost ? '' : 'good');
+  }
   G.me.pick = n; sfx.pick(); paintDyn();
 }
 function ready(){
@@ -1574,7 +1720,8 @@ function startRoll(){
     toast('Мало игроков — раунд отменён, ставки возвращены');
     renderTable(); return;
   }
-  G.phase = 'rolling'; G.t0 = Date.now(); G.roll = rnd(1, 50);
+  G.phase = 'rolling'; G.t0 = Date.now();
+  if (!G.roll) G.roll = rnd(1, 50);      // запасной путь, если отпечаток не успел посчитаться
   G.pot = players.reduce((sum, p) => sum + (p.bet || G.table.stake), 0);
   renderTable();
 }
@@ -1588,7 +1735,13 @@ function finishRound(){
   res.list.forEach(p => { if (p.bot) u.botProfit[p.nick] = (u.botProfit[p.nick] || 0) + (p.won - (p.bet || t.stake)); });
   const me = G.me;
   if (me.ready){
-    const delta = me.won - me.bet;
+    let back = 0;
+    if (G.insured && !me.place){        // страховка вернула половину ставки
+      back = Math.round(me.bet / 2); u.coins += back;
+      setTimeout(() => toast('Страховка вернула ' + money(back) + ' монет'), 700);
+    }
+    const delta = me.won + back - me.bet - (G.insuranceCost || 0);
+    G.myDelta = delta; G.myBack = back;
     u.coins += me.won; u.played++; u.betSum += me.bet; u.winSum += me.won;
     if (me.place){ u.wins++; u.streak++; if (u.streak > u.bestStreak) u.bestStreak = u.streak; } else u.streak = 0;
     if (me.place === 1) u.top1++;
@@ -1611,7 +1764,10 @@ function finishRound(){
   if (me.ready) showResult(me);
 }
 function showResult(me){
-  const delta = me.won - me.bet, rk = { 1:'🥇', 2:'🥈', 3:'🥉' };
+  const delta = (G.myDelta !== undefined) ? G.myDelta : me.won - me.bet;
+  const rk = { 1:'🥇', 2:'🥈', 3:'🥉' };
+  const proof = G.hash ? '<div class="fair mini">число ' + G.roll + ' + соль ' + esc(G.salt) +
+                         ' дают отпечаток ' + esc(G.hash.slice(0, 16)) + '…</div>' : '';
   if (me.place) confetti(me.place === 1 ? 70 : 30);
   $('#layer').innerHTML = `
   <div class="modal" id="resultbox" onclick="closeLayer()">
@@ -1620,6 +1776,8 @@ function showResult(me){
       <h3>${me.place === 1 ? 'Главный победитель!' : me.place ? 'Вы в призах' : 'В этот раз мимо'}</h3>
       <div class="tiny muted">выпало <b class="gold">${G.roll}</b> · ваше ${me.pick} · разница ${Math.abs(me.pick - G.roll)}</div>
       <div class="verdict ${delta > 0 ? 'win' : 'muted'}">${delta > 0 ? '+' : ''}${money(delta)}</div>
+      ${G.myBack ? `<div class="tiny" style="color:var(--emerald);margin-bottom:6px">
+        страховка вернула ${money(G.myBack)} монет</div>` : ''}
       <div class="eyebrow">распределение банка ${money(G.pot)}</div>
       <div class="podium">
         ${G.winners.map((p, i) => `<div class="pl p${i+1}">
@@ -1630,6 +1788,7 @@ function showResult(me){
           <div class="tiny muted">5% банка, из них 10% в копилку добра</div></div>
           <span class="amt muted">${money(G.fee)}</span></div>
       </div>
+      ${proof}
       <div class="acts">
         <button class="btn gold grow" onclick="closeLayer()">Играть дальше</button>
         <button class="btn ghost" onclick="closeLayer();leaveTable()">Выйти</button>
@@ -1901,6 +2060,36 @@ function syncPicker(){
 }
 /* Множитель ставки: стол тот же, но игрок сам решает, сколько поставить.
    Приём из Solitaire Grand Harvest — время игры одно, а траты разные. */
+/* Панель раунда: что стол уже рассказал о числе и какие решения доступны. */
+function hintPanel(){
+  if (!G || G.phase !== 'betting') return '';
+  const shown = (G.shown || []).map(i => G.hints[i]).filter(Boolean);
+  const nextIn = (G.hints || []).map((h, i) => G.shown.indexOf(i) < 0
+      ? Math.max(0, Math.ceil(h.at - (Date.now() - G.t0) / 1000)) : null)
+      .filter(v => v !== null)[0];
+  return `
+    <div class="hints">
+      <div class="row between center">
+        <div class="eyebrow">что известно о числе</div>
+        ${nextIn ? `<span class="tiny muted">следующая через ${nextIn} с</span>` : ''}
+      </div>
+      <div class="hintlist">
+        ${shown.length ? shown.map(h => `<span class="hint">${esc(h.text)}</span>`).join('')
+                       : '<span class="hint empty">пока ничего — первая подсказка на девятой секунде</span>'}
+        ${G.probe ? `<span class="hint probe">${esc(G.probe)}</span>` : ''}
+      </div>
+      <div class="decisions">
+        <button class="dec" onclick="probe()" ${!G.me.pick || G.probe ? 'disabled' : ''}>
+          <b>Проверить</b><span>${G.probe ? 'уже сделано' : money(probeCost()) + ' монет'}</span></button>
+        <button class="dec" onclick="insure()" ${!G.me.ready || G.insured ? 'disabled' : ''}>
+          <b>Страховка</b><span>${G.insured ? 'оформлена' : money(insureCost()) + ' монет'}</span></button>
+        <button class="dec" onclick="pickNum(0,true)" ${G.phase!=='betting' ? 'disabled' : ''}>
+          <b>Сменить</b><span>${G.me.ready ? (swapCost() ? money(swapCost()) + ' монет' : 'бесплатно') : 'выбрать наугад'}</span></button>
+      </div>
+      ${G.hash ? `<div class="fair" title="${esc(G.hash)}">
+        отпечаток числа: <code>${esc(G.hash.slice(0, 16))}…</code></div>` : ''}
+    </div>`;
+}
 function multRow(){
   const t = G.table, mults = [1, 2, 3, 5];
   return `
@@ -1920,7 +2109,7 @@ function setMult(m){ if (!G || G.me.ready) return; G.mult = m; sfx.pick(); paint
 function paintActs(){
   const a = $('#acts'); if (!a) return;
   if (G.phase === 'betting'){
-    a.innerHTML = `${multRow()}
+    a.innerHTML = `${hintPanel()}${multRow()}
       <div class="acts">
         <button class="btn ${G.me.ready ? 'done' : 'gold'} grow" onclick="ready()" ${G.me.ready || !G.me.pick ? 'disabled' : ''}>
           ${G.me.ready ? '✓ Ставка ' + money(G.me.bet) : 'Готов · ' + money(G.table.stake * G.mult)}</button>
