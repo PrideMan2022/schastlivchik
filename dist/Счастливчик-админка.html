@@ -707,6 +707,15 @@ table.tb td .q.gold{color:var(--gold)}
 .fair code{color:var(--dim);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .fair.mini{margin-top:12px;text-align:center}
 
+/* раскладка выборов в итогах раунда: видно, где столпились соперники */
+.spread{display:flex;flex-wrap:wrap;gap:5px;justify-content:center;margin:8px 0 4px}
+.spread .cell{min-width:34px;padding:6px 8px;border-radius:11px;font-weight:700;
+  font-size:clamp(11.5px,3vw,13px);background:rgba(255,255,255,.06);color:var(--dim)}
+.spread .cell i{font-style:normal;font-size:.75em;opacity:.75;margin-left:2px}
+.spread .cell.uniq{background:rgba(52,211,153,.18);color:var(--emerald)}
+.spread .cell.dup{background:rgba(255,107,107,.15);color:var(--red)}
+.spread .cell.mine{box-shadow:inset 0 0 0 1.5px var(--gold);color:var(--txt)}
+
 </style>
 </head>
 <body>
@@ -746,6 +755,10 @@ function read(key, def){
   catch(e){ return JSON.parse(JSON.stringify(def)); }
 }
 function write(key, val){ try{ localStorage.setItem(key, JSON.stringify(val)); }catch(e){} }
+
+/* Диапазон чисел стола. Тридцать пять — компромисс: сетка целиком видна
+   на телефоне, и при этом остаётся простор для верхней зоны призов. */
+const NUMBERS = 35;
 
 /* Встроенные аватары: игрок либо выбирает иконку, либо грузит своё фото. */
 const ICONS = ['🦊','🐻','🐼','🦁','🐯','🐺','🦉','🦅','🐙','🦈','🐳','🦄','🐝','🦋','🐢','🐸',
@@ -805,7 +818,7 @@ if (C.settingsVersion !== SETTINGS_VERSION){
   write(K_CORE, C);
 }
 if (!U.id){ U.id = uid('u'); U.createdAt = Date.now(); }
-if (!U.freq || U.freq.length !== 51) U.freq = new Array(51).fill(0);
+if (!U.freq || U.freq.length !== NUMBERS + 1) U.freq = new Array(NUMBERS + 1).fill(0);
 
 /* Пишем сразу, без отложенного сохранения: админка перечитывает хранилище
    на каждой перерисовке, и отложенная запись затирала бы свежие решения. */
@@ -816,7 +829,7 @@ function flush(){ if (wiped) return; write(K_USER, U); write(K_CORE, C); }
 function reload(){ U = read(K_USER, USER_DEF); C = read(K_CORE, CORE_DEF);
   if (C.settingsVersion !== SETTINGS_VERSION){
     C.settings = JSON.parse(JSON.stringify(CORE_DEF.settings)); C.settingsVersion = SETTINGS_VERSION; }
-  if (!U.freq || U.freq.length !== 51) U.freq = new Array(51).fill(0); }
+  if (!U.freq || U.freq.length !== NUMBERS + 1) U.freq = new Array(NUMBERS + 1).fill(0); }
 
 /* ---------- журнал действий ---------- */
 function log(actor, action, detail, ref){
@@ -1047,7 +1060,7 @@ function deleteAccount(){
   saveCore();
   localStorage.removeItem(K_USER);
   U = JSON.parse(JSON.stringify(USER_DEF));
-  U.id = uid('u'); U.createdAt = Date.now(); U.freq = new Array(51).fill(0); U.consents = {};
+  U.id = uid('u'); U.createdAt = Date.now(); U.freq = new Array(NUMBERS + 1).fill(0); U.consents = {};
   saveUser();
   return { ok: true };
 }
@@ -1355,62 +1368,104 @@ function claimPass(level, premium){
 const PASS = { id: 'pass', label: 'Пропуск сезона', price: PASS_PRICE, coins: 0 };
 
 /* ============================================================
-   ЧЕСТНОЕ ЧИСЛО И ПОДСКАЗКИ
-   Число выпадает в начале раунда и сразу фиксируется отпечатком SHA-256.
-   Отпечаток виден игрокам до ставок, соль раскрывается после розыгрыша —
-   любой может проверить, что число не подменяли. Именно поэтому подсказки
-   честны: стол не подгоняет результат под ставки, он раскрывает свойства
-   уже загаданного числа.
+   НАИМЕНЬШЕЕ УНИКАЛЬНОЕ ЧИСЛО
+   Генератора случайных чисел в раунде нет вообще: исход целиком решают
+   сами игроки. Считаются только уникальные числа — те, что взял ровно
+   один участник. Поэтому игрок думает не «повезёт ли мне», а «сколько
+   человек сегодня возьмут двойку».
    ============================================================ */
-async function commitNumber(){
-  const value = rnd(1, 50);
-  const salt = uid('s');
-  let hash = '';
-  try {
-    const data = new TextEncoder().encode(value + ':' + salt);
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    hash = Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  } catch(e){ hash = 'проверка недоступна в этом браузере'; }
-  return { value: value, salt: salt, hash: hash };
+function plural(n, a, b, c){
+  const m = Math.abs(n) % 100, d = m % 10;
+  if (m > 10 && m < 20) return c; if (d > 1 && d < 5) return b; if (d === 1) return a; return c;
 }
-/* Подсказки — правдивые факты о загаданном числе, от общих к точным. */
-function makeHints(value){
-  const half = value <= 25 ? 'от 1 до 25' : 'от 26 до 50';
-  const parity = value % 2 ? 'нечётное' : 'чётное';
-  const lo = Math.max(1, Math.min(41, value - rnd(3, 9)));
-  const hi = Math.min(50, lo + 9);
-  const band = (value >= lo && value <= hi) ? [lo, hi] : [Math.max(1, value - 5), Math.min(50, value + 4)];
-  return [
-    { at: 9,  text: 'Число ' + half },
-    { at: 18, text: 'Число ' + parity },
-    { at: 25, text: 'Число между ' + band[0] + ' и ' + band[1] }
-  ];
+/* Числа, встречающиеся ровно один раз, по возрастанию. */
+function uniqueSorted(picks){
+  const counts = {};
+  picks.forEach(p => counts[p] = (counts[p] || 0) + 1);
+  return Object.keys(counts).map(Number).filter(v => counts[v] === 1).sort((a, b) => a - b);
 }
+/* Сколько игроков выбрали это же число — основа платной разведки. */
+function sharesOf(picks, value){ return picks.filter(p => p === value).length; }
+
+/* Сводки о поведении стола: говорят о том, что делают соперники прямо
+   сейчас, а не о «загаданном числе» — загаданного числа здесь нет. */
+function tableReport(picks, kind){
+  const n = picks.length;
+  if (!n) return 'ставок пока нет';
+  const third = Math.ceil(NUMBERS / 3);
+  if (kind === 0){
+    const low = picks.filter(p => p <= third).length;
+    return 'в нижней трети (1–' + third + ') уже ' + low + ' ' + plural(low, 'ставка', 'ставки', 'ставок');
+  }
+  if (kind === 1){
+    const counts = {};
+    picks.forEach(p => counts[p] = (counts[p] || 0) + 1);
+    const dup = Object.keys(counts).filter(k => counts[k] > 1).length;
+    return dup ? 'совпадений уже ' + dup + ' ' + plural(dup, 'штука', 'штуки', 'штук')
+               : 'пока все числа разные';
+  }
+  const uniq = uniqueSorted(picks).length;
+  return 'уникальных чисел на столе: ' + uniq;
+}
+
 /* Цены решений внутри раунда — доля от ставки, всегда видна заранее. */
 const ACTIONS = {
   swap:      { part: 0.25, label: 'Сменить число' },
-  probe:     { part: 0.15, label: 'Проверить число' },
+  probe:     { part: 0.15, label: 'Разведка' },
   insurance: { part: 0.30, label: 'Страховка' }
 };
 
-/* ---------- экономика раунда ---------- */
-/* Возвращает распределение банка. Доли 70/20/5, комиссия 5%,
-   копейки округления и невостребованные доли — первому месту.   */
-/* Банк складывается из личных ставок: у каждого своя, потому что игрок
-   выбирает множитель. Доли победителей считаются от общего банка. */
-function payout(players, roll, stake){
+/* ---------- экономика раунда ----------
+   Банк складывается из личных ставок: у каждого своя, потому что игрок
+   выбирает множитель. Призы устроены так, чтобы играла вся сетка:
+
+     первое место   — наименьшее уникальное число (65 % банка);
+     второе место   — наибольшее уникальное (25 %);
+     третье место   — следующее уникальное снизу (5 %);
+     комиссия стола — 5 %.
+
+   Второй приз добавлен не для красоты: при награде только за малые числа
+   победа почти всегда достаётся числам от двух до пяти, и верхние тридцать
+   значений становятся мёртвым грузом. Приз за верх возвращает их в игру.
+   Если уникальных чисел нет совсем, банк за вычетом комиссии переходит
+   в следующий раунд стола и достаётся его первому победителю.          */
+function payout(players, carry){
+  const picks = players.map(p => p.pick);
+  const uniq = uniqueSorted(picks);
+  const bank = players.reduce((sum, p) => sum + (p.bet || 0), 0);
+  const fee = Math.round(bank * 0.05);
+  const pot = bank + (carry || 0);
+  players.forEach(p => { p.place = 0; p.won = 0; });
+
+  /* Числа-победители: снизу, сверху и снова снизу — без повторов. */
+  const winNums = [];
+  if (uniq.length) winNums.push(uniq[0]);
+  if (uniq.length > 1) winNums.push(uniq[uniq.length - 1]);
+  if (uniq.length > 2) winNums.push(uniq[1]);
+
   const list = players.slice().sort((a, b) => {
-    const da = Math.abs(a.pick - roll), db = Math.abs(b.pick - roll);
-    return da !== db ? da - db : a.readyAt - b.readyAt;
+    const ia = winNums.indexOf(a.pick), ib = winNums.indexOf(b.pick);
+    if (ia >= 0 && ib >= 0) return ia - ib;
+    if (ia >= 0) return -1;
+    if (ib >= 0) return 1;
+    return a.pick - b.pick || a.readyAt - b.readyAt;
   });
-  const pot = list.reduce((sum, p) => sum + (p.bet || stake), 0);
-  const fee = Math.round(pot * 0.05);
-  const shares = [0.70, 0.20, 0.05];
+  if (!winNums.length){
+    return { list: list, pot: pot, fee: fee, paid: 0, bank: bank,
+             uniq: uniq, carry: pot - fee, winners: [] };
+  }
+  const shares = [0.65, 0.25, 0.05];
+  const winners = winNums.map(n => list.find(p => p.pick === n)).filter(Boolean);
   let paid = 0;
-  list.forEach((p, i) => { p.place = i < 3 ? i + 1 : 0; p.won = i < 3 ? Math.floor(pot * shares[i]) : 0; paid += p.won; });
-  const rest = pot - fee - paid;
-  if (rest > 0 && list[0]){ list[0].won += rest; paid += rest; }
-  return { list: list, pot: pot, fee: fee, paid: paid };
+  winners.forEach((p, i) => {
+    p.place = i + 1;
+    p.won = Math.floor((pot - fee) * shares[i] / 0.95);
+    paid += p.won;
+  });
+  const rest = pot - fee - paid;      // доли ненайденных мест и копейки — первому
+  if (rest > 0){ winners[0].won += rest; paid += rest; }
+  return { list: list, pot: pot, fee: fee, paid: paid, bank: bank,
+           uniq: uniq, carry: 0, winners: winners };
 }
 function registerFee(fee){ C.houseFee += fee; C.charity += fee * 0.10; saveCore(); }
 
@@ -1419,7 +1474,7 @@ root.Core = {
   STARTER, starterAvailable, starterLeft, dealToday, priceOf,
   LEAGUES, PASS, PASS_LEVELS, PASS_PRICE, passNeed, passReward,
   season, addSeasonPoints, claimPass, weekEnds,
-  commitNumber, makeHints, ACTIONS,
+  NUMBERS, uniqueSorted, sharesOf, tableReport, plural, ACTIONS,
   setProfile, photoToAvatar, validEmail,
   acceptDocs, consentsOk, exportData, deleteAccount,
   DAILY, dailyState, claimDaily, addXp, levelNeed, questsToday, questProgress, claimQuest,
@@ -1429,7 +1484,7 @@ root.Core = {
   withdrawable, coinsToRub, rubToCoins, requestPayout, decidePayout,
   createTicket, resolveTicket, setBlocked, payout, registerFee,
   resetUser(){ const id = U.id; U = JSON.parse(JSON.stringify(USER_DEF)); U.id = id;
-               U.freq = new Array(51).fill(0); U.createdAt = Date.now(); flush(); },
+               U.freq = new Array(NUMBERS + 1).fill(0); U.createdAt = Date.now(); flush(); },
   resetAll(){ wiped = true; localStorage.removeItem(K_USER); localStorage.removeItem(K_CORE); reload(); wiped = false; },
   get wiped(){ return wiped; }
 };

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Счастливчик</title>
-<meta name="description" content="Счастливчик — игра на удачу: угадайте число от 1 до 50 ближе всех и заберите банк.">
+<meta name="description" content="Счастливчик — игра на смекалку: возьмите число, которое не возьмёт никто другой, и заберите банк.">
 <meta name="theme-color" content="#06070a">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -15,11 +15,11 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@600;700;800&family=Nunito:wght@400;600;700;800&display=swap">
-<link rel="stylesheet" href="styles.css?v=43">
+<link rel="stylesheet" href="styles.css?v=50">
 </head>
 <body>
 <header><div class="wrap hd">
-  <img class="logo" src="assets/logo.svg?v=3" alt="Счастливчик" width="40" height="40">
+  <img class="logo" src="assets/logo.svg?v=50" alt="Счастливчик" width="40" height="40">
   <div class="brand"><b>Счастливчик</b><span>число решает всё</span></div>
   <button class="mark" id="hdava" onclick="editProfile()" title="Профиль">🍀</button>
   <div class="purse">
@@ -45,7 +45,7 @@
 <div id="toasts"></div>
 <div id="layer"></div>
 
-<script src="core.js?v=43"></script>
+<script src="core.js?v=50"></script>
 <script>
 'use strict';
 /* Держим высоту приложения равной реально видимой области.
@@ -125,7 +125,7 @@ const NAMES = ['Аркадий','Вера','Тимур','Лидия','Осип',
   'Игнат','Соня','Артур','Тамара','Лев','Агата','Марк','Ксения'];
 function makeBot(){
   const nick = NAMES[rnd(0, NAMES.length - 1)];
-  return { bot:true, nick, mono:Core.ICONS[rnd(0, Core.ICONS.length - 1)], lucky:rnd(1,50),
+  return { bot:true, nick, mono:Core.ICONS[rnd(0, Core.ICONS.length - 1)], greedy:Core.rand() < .35,
            speed:rnd(3,26), lazy:Core.rand() < .08, mult:[1,1,1,2,2,3,5][rnd(0,6)],
            pick:null, ready:false, readyAt:0, place:0, won:0 };
 }
@@ -150,59 +150,41 @@ function exitTable(){
   stopLoop(); G = null; Core.saveUser(); paintCoins(); closeLayer();
 }
 function leaveTable(){ exitTable(); go('lobby'); }
-/* Число загадывается в начале раунда и фиксируется отпечатком SHA-256:
-   подсказки раскрывают свойства уже готового числа, а не подгоняются под ставки. */
-async function commitRound(){
-  const round = G && G.round;
-  const c = await Core.commitNumber();
-  if (!G || G.round !== round) return;
-  G.roll = c.value; G.salt = c.salt; G.hash = c.hash;
-  G.hints = Core.makeHints(c.value);
-  paintDyn();
+/* Стратегия соперника: малые числа заманчивы, но там толпа, поэтому боты
+   распределяются по сетке неравномерно, а часть намеренно уходит повыше. */
+function botPick(bot){
+  const N = Core.NUMBERS;
+  if (bot && bot.greedy && Core.rand() < .5) return rnd(1, Math.ceil(N / 5));
+  const r = Core.rand();
+  if (r < .45) return rnd(1, Math.ceil(N / 3));
+  if (r < .8)  return rnd(Math.ceil(N / 3) + 1, Math.ceil(N * 2 / 3));
+  return rnd(Math.ceil(N * 2 / 3) + 1, N);
 }
-/* Соперники тоже слышат подсказку и часть из них меняет число — иначе
-   игрок один реагирует на новую информацию, и стол кажется мёртвым. */
-function botsRethink(hintIndex){
-  const h = G.hints[hintIndex]; if (!h) return;
+/* После сводки часть соперников передумывает — иначе новая информация
+   меняет поведение только игрока, и стол выглядит мёртвым. */
+function botsRethink(){
   G.seats.forEach(s => {
-    if (!s.bot || !s.pick || Core.rand() > .45) return;
-    const fit = hintFits(h, s.pick);
-    if (fit) return;
-    const n = freeNumberMatching(h);
-    if (n) s.pick = n;
+    if (!s.bot || !s.pick || s.ready || Core.rand() > .4) return;
+    s.pick = botPick(s);
   });
-}
-function hintFits(h, n){
-  const m = h.text.match(/между (\d+) и (\d+)/);
-  if (m) return n >= +m[1] && n <= +m[2];
-  if (h.text.indexOf('нечётное') >= 0) return n % 2 === 1;
-  if (h.text.indexOf('чётное') >= 0) return n % 2 === 0;
-  if (h.text.indexOf('от 1 до 25') >= 0) return n <= 25;
-  if (h.text.indexOf('от 26 до 50') >= 0) return n > 25;
-  return true;
-}
-function freeNumberMatching(h){
-  const taken = new Set(G.seats.filter(s => s.pick).map(s => s.pick));
-  const fit = [];
-  for (let n = 1; n <= 50; n++) if (!taken.has(n) && hintFits(h, n)) fit.push(n);
-  return fit.length ? fit[rnd(0, fit.length - 1)] : 0;
 }
 /* Смена числа после ставки: первая бесплатно, дальше четверть ставки. */
 function swapCost(){ return G.swaps === 0 ? 0 : Math.round(G.me.bet * Core.ACTIONS.swap.part); }
 function probeCost(){ return Math.round(G.table.stake * G.mult * Core.ACTIONS.probe.part); }
 function insureCost(){ return Math.round(G.me.bet * Core.ACTIONS.insurance.part); }
-/* «Проверить число» — стол честно отвечает, насколько выбор далёк от загаданного. */
+/* Разведка: узнать, взял ли кто-то ещё то же число. Главное решение раунда —
+   уходить с занятого числа или ждать, что соперник передумает сам. */
 function probe(){
   if (!G || G.phase !== 'betting' || !G.me.pick || G.probe) return;
   const cost = probeCost();
   if (U().coins < cost){ toast('Не хватает монет', 'bad'); go('shop'); return; }
   U().coins -= cost; Core.saveUser(); paintCoins();
-  const d = Math.abs(G.me.pick - G.roll);
-  G.probe = d <= 2 ? 'горячо: разница не больше двух'
-          : d <= 6 ? 'тепло: разница от трёх до шести'
-          : d <= 12 ? 'прохладно: разница до двенадцати'
-          : 'холодно: разница больше двенадцати';
-  sfx.pick(); toast(G.probe, d <= 6 ? 'good' : ''); paintDyn();
+  const others = G.seats.filter(s => s !== G.me && s.pick).map(s => s.pick);
+  const same = Core.sharesOf(others, G.me.pick);
+  G.probe = same === 0
+    ? 'число ' + G.me.pick + ' пока только ваше'
+    : 'число ' + G.me.pick + ' взяли ещё ' + same + ' ' + Core.plural(same, 'игрок', 'игрока', 'игроков');
+  sfx.pick(); toast(G.probe, same ? 'bad' : 'good'); paintDyn();
 }
 /* Страховка: половина ставки возвращается, если раунд проигран. */
 function insure(){
@@ -218,9 +200,9 @@ function newRound(first){
   const t = G.table;
   G.round++; G.phase = 'betting'; G.t0 = Date.now(); G.roll = 0;
   G.winners = []; G.cancelled = false; pickerPhase = null;
-  G.hints = []; G.shown = []; G.hash = ''; G.salt = '';
+  G.reports = []; G.shown = [];
   G.probe = null; G.insured = false; G.swaps = 0;
-  commitRound();
+  G.myDelta = undefined; G.myBack = 0; G.insuranceCost = 0;
   const keep = first ? [] : G.seats.filter(s => s.bot && Core.rand() < .65);
   keep.forEach(b => { b.pick=null; b.ready=false; b.readyAt=0; b.place=0; b.won=0; b.speed=rnd(3,26); b.lazy=Core.rand()<.08; });
   const me = { bot:false, nick:'Вы', mono:'В', pick:null, ready:false, readyAt:0, place:0, won:0 };
@@ -243,18 +225,21 @@ function tick(){
     G.seats.forEach(s => {
       if (!s.bot || s.ready) return;
       const sec = el / 1000;
-      if (!s.pick && sec > s.speed * .4) s.pick = freeNumber(s.lucky);
+      if (!s.pick && sec > s.speed * .4) s.pick = botPick(s);
       if (!s.lazy && sec >= s.speed && s.pick){
         s.ready = true; s.readyAt = Date.now(); s.bet = G.table.stake * (s.mult || 1);
       }
     });
-    /* Подсказки выходят по расписанию; каждая — повод пересмотреть выбор. */
+    /* Сводки о поведении стола: три раза за раунд, каждая — повод
+       пересмотреть выбор, пока соперники делают то же самое. */
     const passed = el / 1000;
-    (G.hints || []).forEach((h, i) => {
-      if (passed >= h.at && G.shown.indexOf(i) < 0){
+    [9, 18, 25].forEach((at, i) => {
+      if (passed >= at && G.shown.indexOf(i) < 0){
+        const picks = G.seats.filter(s => s !== G.me && s.pick).map(s => s.pick);
+        G.reports.push(Core.tableReport(picks, i));
         G.shown.push(i);
-        sfx.pick(); toast('Подсказка: ' + h.text.toLowerCase());
-        botsRethink(i);
+        sfx.pick(); toast('Сводка: ' + G.reports[G.reports.length - 1]);
+        botsRethink();
         paintDyn();
       }
     });
@@ -263,23 +248,24 @@ function tick(){
     if (left <= 0 || (allReady && el > 2500)) startRoll(); else paintDyn();
   } else if (G.phase === 'rolling'){
     if (el < ROLL_MS){
+      /* Вскрытие: по очереди показываем числа тех, кто действительно играл. */
       const b = $('#drawnum');
-      if (b){ b.textContent = rnd(1, 50); if (Math.random() < .35) sfx.roll(); }
+      if (b && G.reveal && G.reveal.length){
+        const i = Math.floor(el / (ROLL_MS / G.reveal.length));
+        const v = G.reveal[Math.min(i, G.reveal.length - 1)];
+        if (b.textContent !== String(v)){ b.textContent = v; sfx.roll(); }
+      }
     } else finishRound();
   } else if (G.phase === 'results'){
     if (el > RESULT_MS && !$('#resultbox')) newRound(false);
   }
 }
-function freeNumber(pref){
-  const taken = new Set(G.seats.filter(s => s.pick).map(s => s.pick));
-  if (pref && !taken.has(pref) && Core.rand() < .5) return pref;
-  let n, g = 0; do { n = rnd(1, 50); } while (taken.has(n) && ++g < 200);
-  return n;
-}
+/* Свободных чисел больше нет: одно и то же число может взять кто угодно —
+   в этом и состоит игра. Осталась только подсказка для кнопки «наугад». */
+function randomNumber(){ return rnd(1, Core.NUMBERS); }
 function pickNum(n, random){
   if (!G || G.phase !== 'betting') return;
-  if (random) n = freeNumber(null);
-  if (G.seats.some(s => s !== G.me && s.pick === n)) return;
+  if (random) n = randomNumber();
   if (G.me.ready){                       // ставка уже сделана — это смена решения
     const cost = swapCost();
     if (cost && U().coins < cost){ toast('Не хватает монет на смену', 'bad'); return; }
@@ -307,17 +293,19 @@ function startRoll(){
     renderTable(); return;
   }
   G.phase = 'rolling'; G.t0 = Date.now();
-  if (!G.roll) G.roll = rnd(1, 50);      // запасной путь, если отпечаток не успел посчитаться
-  G.pot = players.reduce((sum, p) => sum + (p.bet || G.table.stake), 0);
+  G.reveal = players.map(p => p.pick).sort(() => Core.rand() - .5);
+  G.pot = players.reduce((sum, p) => sum + (p.bet || G.table.stake), 0) + (G.carry || 0);
   renderTable();
 }
 function finishRound(){
   const t = G.table, players = G.seats.filter(s => s.ready && s.pick);
-  const res = Core.payout(players, G.roll, t.stake);
-  G.pot = res.pot; G.fee = res.fee; G.winners = res.list.slice(0, 3);
+  const res = Core.payout(players, G.carry || 0);
+  G.pot = res.pot; G.fee = res.fee; G.bank = res.bank;
+  G.winners = res.winners; G.uniq = res.uniq; G.carry = res.carry;
+  G.roll = res.winners.length ? res.winners[0].pick : 0;   // победное число раунда
   Core.registerFee(res.fee);
   const u = U();
-  u.freq[G.roll]++;
+  if (G.roll) u.freq[G.roll]++;
   res.list.forEach(p => { if (p.bot) u.botProfit[p.nick] = (u.botProfit[p.nick] || 0) + (p.won - (p.bet || t.stake)); });
   const me = G.me;
   if (me.ready){
@@ -352,29 +340,48 @@ function finishRound(){
 function showResult(me){
   const delta = (G.myDelta !== undefined) ? G.myDelta : me.won - me.bet;
   const rk = { 1:'🥇', 2:'🥈', 3:'🥉' };
-  const proof = G.hash ? '<div class="fair mini">число ' + G.roll + ' + соль ' + esc(G.salt) +
-                         ' дают отпечаток ' + esc(G.hash.slice(0, 16)) + '…</div>' : '';
+  const noWinner = !G.winners.length;
+  const others = G.seats.filter(s => s.ready && s.pick && s !== G.me).map(s => s.pick);
+  const sameAsMe = Core.sharesOf(others, me.pick);
+  /* Раскладка выборов: сразу видно, где столпились соперники и почему
+     число сгорело — без этого проигрыш выглядит случайностью. */
+  const counts = {};
+  G.seats.filter(s => s.ready && s.pick).forEach(s => counts[s.pick] = (counts[s.pick] || 0) + 1);
+  const spread = Object.keys(counts).map(Number).sort((a, b) => a - b).map(n => {
+    const c = counts[n], mine = me.pick === n && me.ready;
+    return `<span class="cell ${c === 1 ? 'uniq' : 'dup'} ${mine ? 'mine' : ''}">${n}${c > 1 ? '<i>×' + c + '</i>' : ''}</span>`;
+  }).join('');
   if (me.place) confetti(me.place === 1 ? 70 : 30);
   $('#layer').innerHTML = `
   <div class="modal" id="resultbox" onclick="closeLayer()">
     <div class="mbox" onclick="event.stopPropagation()">
-      <div style="font-size:44px;line-height:1">${me.place ? rk[me.place] : '🎲'}</div>
-      <h3>${me.place === 1 ? 'Главный победитель!' : me.place ? 'Вы в призах' : 'В этот раз мимо'}</h3>
-      <div class="tiny muted">выпало <b class="gold">${G.roll}</b> · ваше ${me.pick} · разница ${Math.abs(me.pick - G.roll)}</div>
+      <div style="font-size:44px;line-height:1">${me.place ? rk[me.place] : noWinner ? '🎯' : '🎲'}</div>
+      <h3>${me.place === 1 ? 'Главный победитель!' : me.place ? 'Вы в призах'
+            : noWinner ? 'Уникальных чисел нет' : 'В этот раз мимо'}</h3>
+      <div class="tiny muted">${noWinner
+        ? 'каждое число кто-то продублировал — банк переходит в следующий раунд'
+        : 'победило ' + G.roll + ' · ваше ' + me.pick +
+          (sameAsMe ? ' · его взяли ещё ' + sameAsMe : ' · оно было уникальным')}</div>
       <div class="verdict ${delta > 0 ? 'win' : 'muted'}">${delta > 0 ? '+' : ''}${money(delta)}</div>
       ${G.myBack ? `<div class="tiny" style="color:var(--emerald);margin-bottom:6px">
         страховка вернула ${money(G.myBack)} монет</div>` : ''}
-      <div class="eyebrow">распределение банка ${money(G.pot)}</div>
+      <div class="eyebrow">кто какое число взял</div>
+      <div class="spread">${spread}</div>
+      <div class="eyebrow" style="margin-top:14px">распределение банка ${money(G.pot)}</div>
       <div class="podium">
         ${G.winners.map((p, i) => `<div class="pl p${i+1}">
           <span class="rk">${rk[i+1]}</span>
-          <div class="main"><b>${esc(p.nick)}</b><div class="tiny muted">число ${p.pick} · разница ${Math.abs(p.pick - G.roll)}</div></div>
+          <div class="main"><b>${esc(p.nick)}</b><div class="tiny muted">число ${p.pick} · ${
+            i === 0 ? 'самое малое уникальное' : i === 1 ? 'самое большое уникальное' : 'второе снизу'}</div></div>
           <span class="amt">+${money(p.won)}</span></div>`).join('')}
+        ${noWinner ? `<div class="pl"><span class="rk">↷</span>
+          <div class="main"><b>Переходит дальше</b>
+            <div class="tiny muted">достанется первому победителю следующего раунда</div></div>
+          <span class="amt gold">${money(G.carry)}</span></div>` : ''}
         <div class="pl"><span class="rk">🏛</span><div class="main"><b>Комиссия стола</b>
           <div class="tiny muted">5% банка, из них 10% в копилку добра</div></div>
           <span class="amt muted">${money(G.fee)}</span></div>
       </div>
-      ${proof}
       <div class="acts">
         <button class="btn gold grow" onclick="closeLayer()">Играть дальше</button>
         <button class="btn ghost" onclick="closeLayer();leaveTable()">Выйти</button>
@@ -580,23 +587,29 @@ function paintDyn(force){
       $('#dialnum').textContent = left;
       $('#arc').setAttribute('stroke-dashoffset', String(C0 * (1 - frac)));
       $('#dial').classList.toggle('warn', left <= 5);
-      $('#banknum').textContent = money(inGame * t.stake);
-      $('#banksub').textContent = inGame + ' ' + plural(inGame,'ставка','ставки','ставок') + ' по ' + t.stake;
+      const sum = G.seats.filter(x => x.ready).reduce((a, x) => a + (x.bet || t.stake), 0) + (G.carry || 0);
+      $('#banknum').textContent = money(sum);
+      $('#banksub').textContent = inGame + ' ' + plural(inGame,'ставка','ставки','ставок') +
+        (G.carry ? ' · перенос ' + money(G.carry) : '');
     }
     $('#phaselab').textContent = 'приём ставок';
   } else if (G.phase === 'rolling'){
     if (!$('#drawnum')) dyn.innerHTML = `
-      <div class="drawn spin"><b class="num" id="drawnum">0</b></div>
-      <div class="bank"><div class="lb">разыгрывается банк</div><b class="num gold">${money(G.pot)}</b>
-        <div class="sm">комиссия стола 5%</div></div>`;
-    $('#phaselab').textContent = 'розыгрыш';
+      <div class="drawn spin"><b class="num" id="drawnum">·</b></div>
+      <div class="bank"><div class="lb">вскрываем числа</div><b class="num gold">${money(G.pot)}</b>
+        <div class="sm">ищем уникальные</div></div>`;
+    $('#phaselab').textContent = 'вскрытие';
   } else {
     dyn.innerHTML = G.cancelled
       ? `<div class="drawn void"><b>отмена</b></div>
          <div class="bank"><div class="lb">мало игроков</div><b class="num muted">—</b><div class="sm">ставки возвращены</div></div>`
-      : `<div class="drawn hit"><b class="num">${G.roll}</b></div>
-         <div class="bank"><div class="lb">банк раунда</div><b class="num gold">${money(G.pot)}</b>
-           <div class="sm">комиссия ${money(G.fee)} · выплачено ${money(G.pot - G.fee)}</div></div>`;
+      : G.roll
+        ? `<div class="drawn hit"><b class="num">${G.roll}</b></div>
+           <div class="bank"><div class="lb">победное число</div><b class="num gold">${money(G.pot)}</b>
+             <div class="sm">комиссия ${money(G.fee)} · выплачено ${money(G.pot - G.fee)}</div></div>`
+        : `<div class="drawn void"><b>—</b></div>
+           <div class="bank"><div class="lb">уникальных нет</div><b class="num gold">${money(G.carry)}</b>
+             <div class="sm">банк переходит в следующий раунд</div></div>`;
     $('#phaselab').textContent = 'итоги';
   }
   paintSeats(); paintActs();
@@ -631,49 +644,44 @@ function buildPicker(){
   p.innerHTML = `
     <div class="picker">
       <div class="pickhead"><div class="eyebrow">ваше число</div>
-        <div class="tiny muted">занятые числа недоступны</div></div>
-      <div class="g50">${Array.from({length:50},(_,i)=>`<button data-n="${i+1}" onclick="pickNum(${i+1})">${i+1}</button>`).join('')}</div>
+        <div class="tiny muted">чужие числа не видны — они могут совпасть с вашим</div></div>
+      <div class="g50">${Array.from({length:Core.NUMBERS},(_,i)=>`<button data-n="${i+1}" onclick="pickNum(${i+1})">${i+1}</button>`).join('')}</div>
     </div>`;
 }
 function syncPicker(){
   if (G.phase !== 'betting') return;
-  const taken = new Set(G.seats.filter(s => s !== G.me && s.pick).map(s => s.pick));
   $$('#picker .g50 button').forEach(b => {
-    const n = +b.dataset.n;
-    b.classList.toggle('taken', taken.has(n) || G.me.ready);
-    b.classList.toggle('sel', G.me.pick === n);
+    b.classList.toggle('sel', G.me.pick === +b.dataset.n);
   });
 }
 /* Множитель ставки: стол тот же, но игрок сам решает, сколько поставить.
    Приём из Solitaire Grand Harvest — время игры одно, а траты разные. */
-/* Панель раунда: что стол уже рассказал о числе и какие решения доступны. */
+/* Панель раунда: что известно о поведении стола и какие решения доступны. */
 function hintPanel(){
   if (!G || G.phase !== 'betting') return '';
-  const shown = (G.shown || []).map(i => G.hints[i]).filter(Boolean);
-  const nextIn = (G.hints || []).map((h, i) => G.shown.indexOf(i) < 0
-      ? Math.max(0, Math.ceil(h.at - (Date.now() - G.t0) / 1000)) : null)
+  const nextIn = [9, 18, 25].map((t, i) => G.shown.indexOf(i) < 0
+      ? Math.max(0, Math.ceil(t - (Date.now() - G.t0) / 1000)) : null)
       .filter(v => v !== null)[0];
   return `
     <div class="hints">
       <div class="row between center">
-        <div class="eyebrow">что известно о числе</div>
-        ${nextIn ? `<span class="tiny muted">следующая через ${nextIn} с</span>` : ''}
+        <div class="eyebrow">что происходит за столом</div>
+        ${nextIn ? `<span class="tiny muted">сводка через ${nextIn} с</span>` : ''}
       </div>
       <div class="hintlist">
-        ${shown.length ? shown.map(h => `<span class="hint">${esc(h.text)}</span>`).join('')
-                       : '<span class="hint empty">пока ничего — первая подсказка на девятой секунде</span>'}
+        ${(G.reports || []).length ? G.reports.map(r => `<span class="hint">${esc(r)}</span>`).join('')
+          : '<span class="hint empty">первая сводка на девятой секунде</span>'}
         ${G.probe ? `<span class="hint probe">${esc(G.probe)}</span>` : ''}
       </div>
       <div class="decisions">
         <button class="dec" onclick="probe()" ${!G.me.pick || G.probe ? 'disabled' : ''}>
-          <b>Проверить</b><span>${G.probe ? 'уже сделано' : money(probeCost()) + ' монет'}</span></button>
+          <b>Разведка</b><span>${G.probe ? 'уже сделана' : money(probeCost()) + ' монет'}</span></button>
         <button class="dec" onclick="insure()" ${!G.me.ready || G.insured ? 'disabled' : ''}>
           <b>Страховка</b><span>${G.insured ? 'оформлена' : money(insureCost()) + ' монет'}</span></button>
-        <button class="dec" onclick="pickNum(0,true)" ${G.phase!=='betting' ? 'disabled' : ''}>
-          <b>Сменить</b><span>${G.me.ready ? (swapCost() ? money(swapCost()) + ' монет' : 'бесплатно') : 'выбрать наугад'}</span></button>
+        <button class="dec" onclick="pickNum(0,true)">
+          <b>Сменить</b><span>${G.me.ready ? (swapCost() ? money(swapCost()) + ' монет' : 'бесплатно') : 'наугад'}</span></button>
       </div>
-      ${G.hash ? `<div class="fair" title="${esc(G.hash)}">
-        отпечаток числа: <code>${esc(G.hash.slice(0, 16))}…</code></div>` : ''}
+      ${G.carry ? `<div class="fair">перенос с прошлого раунда: <b class="gold">${money(G.carry)}</b></div>` : ''}
     </div>`;
 }
 function multRow(){
@@ -941,7 +949,7 @@ function renderMe(){
         <div class="kpi"><b class="num">${money(u.betSum)}</b><span>поставлено</span></div>
       </div>
       <div class="panel">
-        <div class="eyebrow">частота выпавших чисел</div>
+        <div class="eyebrow">какие числа побеждали</div>
         <div class="chart">${u.freq.slice(1).map(v=>`<i class="${v>0&&v>=maxf?'hot':''}" style="height:${Math.round(v/maxf*100)}%"></i>`).join('')}</div>
         <div class="row between tiny muted" style="margin-top:6px"><span>1</span><span>25</span><span>50</span></div>
       </div>
@@ -1248,36 +1256,37 @@ function renderRules(){
   $('#app').innerHTML = `
    <div class="screen"><div class="head">
     <div class="h1">Правила</div>
-    <div class="sub">Угадайте число ближе всех — заберите банк. Полторы минуты на чтение.</div>
+    <div class="sub">Возьмите число, которое не возьмёт никто другой. Полторы минуты на чтение.</div>
     </div><div class="scroll">
     <div class="rules">
       ${rule('I', 'Стол и ставка',
-        'Столы на 5 и 10 человек со ставкой 10, 50, 100, 500 или 1000 монет. Ставка одинакова для всех, банк — сумма ставок участников раунда.')}
+        'Столы на 5 и 10 человек с базовой ставкой 10, 50, 100, 500 или 1000 монет. Множитель ×1…×5 каждый выбирает сам, банк — сумма ставок участников раунда.')}
       ${rule('II', 'Ваше число',
-        'Выберите число от 1 до 50 и нажмите «готов» — на это тридцать секунд. Одно число занимает только один игрок. Кто не успел, в раунде не участвует и ничего не теряет.')}
-      ${rule('III', 'Розыгрыш',
-        'Стол выдаёт число криптостойким генератором браузера. Побеждает тот, чьё число ближе к выпавшему; при равной разнице выше тот, кто раньше нажал «готов».')}
-      ${rule('IV', 'Три победителя',
-        'Банк делится между тремя ближайшими, ещё 5% — комиссия стола.',
+        'Выберите число от 1 до 35 и нажмите «готов» — на это тридцать секунд. Числа не резервируются: то же число может взять кто угодно, и чужой выбор не виден. Кто не успел, в раунде не участвует и ничего не теряет.')}
+      ${rule('III', 'Кто побеждает',
+        'Случайного числа нет. Считаются только уникальные числа — те, что взял ровно один игрок. Главный приз забирает самое маленькое из них, второй — самое большое, третий — следующее снизу.',
+        '<p class="fine">Поэтому в игре две зоны: внизу тесно и точно, наверху просторно и смело. Если уникальных чисел нет совсем, банк за вычетом комиссии переходит в следующий раунд.</p>')}
+      ${rule('IV', 'Как делится банк',
+        'Три приза достаются трём уникальным числам, ещё 5% — комиссия стола.',
         `<div class="shares">
-           <div class="share s1"><b>70%</b><span>первое место</span></div>
-           <div class="share s2"><b>20%</b><span>второе</span></div>
-           <div class="share s3"><b>5%</b><span>третье</span></div>
+           <div class="share s1"><b>65%</b><span>самое малое</span></div>
+           <div class="share s2"><b>25%</b><span>самое большое</span></div>
+           <div class="share s3"><b>5%</b><span>второе снизу</span></div>
            <div class="share s4"><b>5%</b><span>столу</span></div>
          </div>
-         <p class="fine">Играли меньше трёх — невостребованные доли уходят первому месту.
-           Меньше двух — раунд отменяется, ставки возвращаются.</p>`)}
-      ${rule('V', 'Как это считается',
-        'Десять игроков по 100 монет собирают банк 1000.',
+         <p class="fine">Уникальных чисел меньше трёх — невостребованные доли уходят первому месту.
+           Игроков меньше двух — раунд отменяется, ставки возвращаются.</p>`)}
+      ${rule('V', 'Пример на десять человек',
+        'Ставки по 100 монет, банк 1000. Взяты числа 4, 4, 7, 9, 9, 12, 15, 15, 21, 30 — четвёрки, девятки и пятнадцатые сгорают.',
         `<div class="example">
-           <div class="ex"><span class="pos g">1</span><span>получает</span><b>700</b></div>
-           <div class="ex"><span class="pos s">2</span><span>получает</span><b>200</b></div>
-           <div class="ex"><span class="pos b">3</span><span>получает</span><b>50</b></div>
-           <div class="ex dim"><span class="pos h">%</span><span>столу</span><b>50</b></div>
+           <div class="ex"><span class="pos g">1</span><span>число 7 — самое малое уникальное</span><b>650</b></div>
+           <div class="ex"><span class="pos s">2</span><span>число 30 — самое большое</span><b>250</b></div>
+           <div class="ex"><span class="pos b">3</span><span>число 12 — второе снизу</span><b>50</b></div>
+           <div class="ex dim"><span class="pos h">%</span><span>комиссия стола</span><b>50</b></div>
          </div>`)}
-      ${rule('VI', 'Шансы',
-        'За столом на десять человек шанс занять каждое призовое место — 10%, попасть в призы — 30%. Ожидаемый возврат 95%: пять процентов банка забирает стол.',
-        '<p class="fine">Игра рассчитана на развлечение, а не на заработок: на длинной дистанции баланс тает.</p>')}
+      ${rule('VI', 'Чем помогает голова',
+        'Исход зависит не от генератора, а от того, угадаете ли вы поведение соперников. Внизу главный приз, но там толпа и числа сгорают парами. Наверху число почти наверняка уникально, зато приз меньше и его перехватит тот, кто взял ещё выше.',
+        '<p class="fine">Комиссия стола — 5% банка, поэтому в сумме игроки получают 95% от поставленного. Игра рассчитана на развлечение, а не на заработок.</p>')}
       ${rule('VII', 'Монеты',
         'Монеты покупаются за рубли и тратятся только в игре: обратно в деньги они не превращаются и не выводятся. Ошибочный платёж возвращается заявкой в течение ' + CC().settings.refundDays + ' дней.')}
       ${rule('VIII', 'Копилка добра',
